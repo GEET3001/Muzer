@@ -27,6 +27,7 @@ const handler = NextAuth({
                 });
             }
             catch (e) {
+                console.error("signIn upsert failed:", e);
                 return false;
             }
             return true;

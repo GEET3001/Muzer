@@ -1,44 +1,55 @@
 import { prismaClient } from "@/app/lib/db";
+import { isParticipant } from "@/app/lib/access";
 import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 const UpvoteSchema = z.object({
-    streamId: z.string(),
-})
+  streamId: z.string().min(1),
+});
 
 export async function POST(req: NextRequest) {
-    const session = await getServerSession();
+  const session = await getServerSession();
+  if (!session?.user?.email) {
+    return NextResponse.json({ message: "unauthenticated" }, { status: 401 });
+  }
 
-    const user = await prismaClient.user.findFirst({
-        where: {
-            email: session?.user?.email ?? ""
-        }
+  const user = await prismaClient.user.findUnique({
+    where: { email: session.user.email },
+  });
+  if (!user) {
+    return NextResponse.json({ message: "unauthenticated" }, { status: 401 });
+  }
+
+  const parsed = UpvoteSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ message: "streamId is required" }, { status: 400 });
+  }
+
+  // Only participants of the track's session may vote (two-code auth).
+  const stream = await prismaClient.stream.findUnique({
+    where: { id: parsed.data.streamId },
+    include: { session: true },
+  });
+  if (!stream) {
+    return NextResponse.json({ message: "Stream not found" }, { status: 404 });
+  }
+  if (!stream.session || !(await isParticipant(user.id, stream.session))) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  try {
+    await prismaClient.upvotes.upsert({
+      where: {
+        userId_streamId: { userId: user.id, streamId: parsed.data.streamId },
+      },
+      update: {},
+      create: { userId: user.id, streamId: parsed.data.streamId },
     });
 
-    if (!user) {
-        return NextResponse.json({ message: "unauthenticated" }, { status: 403 });
-    }
-
-    try {
-        const data = UpvoteSchema.parse(await req.json());
-
-        await prismaClient.upvotes.upsert({
-            where: {
-                userId_streamId: {
-                    userId: user.id,
-                    streamId: data.streamId
-                }
-            },
-            update: {},
-            create: {
-                userId: user.id,
-                streamId: data.streamId
-            }
-        });
-
-        return NextResponse.json({ message: "upvoted successfully" }, { status: 200 });
-    } catch (e) {
-        return NextResponse.json({ message: "error while upvoting" }, { status: 403 });
-    }
+    return NextResponse.json({ message: "upvoted successfully" });
+  } catch (e) {
+    console.error("POST /api/streams/upvote failed:", e);
+    return NextResponse.json({ message: "error while upvoting" }, { status: 500 });
+  }
 }

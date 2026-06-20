@@ -64,6 +64,7 @@ enum StreamType {
 model Session {
   id        String          @id @default(uuid())
   code      String          @unique
+  accessCode String
   hostId    String
   host      User            @relation("SessionHost", fields: [hostId], references: [id])
   members   SessionMember[]

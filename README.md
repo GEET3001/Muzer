@@ -1,13 +1,19 @@
-# Muzi
+# Muzer
 
-Collaborative music streaming: host a session, share a link, friends add songs and vote. The most upvoted track plays next.
+Collaborative music streaming: host a session, share a link, friends add songs and vote. The most upvoted track plays next — everyone's the DJ.
 
 ## Features
 - Google sign-in via NextAuth
-- Host session with short join code
-- Add YouTube songs by URL (auto title/thumbnail)
+- **Two-code join (2-factor):** every room has a public **Join Code** and a secret **Access Code**. Guests must enter *both* on the Join screen (`/join`) — there is no open share link. Access is enforced server-side: only the host or members who passed both codes can view, add, or vote.
+- Add YouTube songs by URL (any URL shape: `watch?v=`, `youtu.be/`, `embed/`); auto title/thumbnail with a CDN fallback
 - Live queue updates via polling (SWR)
-- Upvote to reorder queue dynamically
+- Upvote/downvote to reorder the queue dynamically
+- Host deck controls: skip to the next track and remove tracks from the queue
+
+## Joining a stream
+1. The host opens the dashboard — it shows the **Join Code** and **Access Code**.
+2. The host shares both codes with the crew (the access code over a separate channel).
+3. Guests go to **Join Stream** (`/join`), enter both codes, and land in the room.
 
 ## Tech
 - Next.js (App Router)
@@ -23,9 +29,13 @@ pnpm install
 ```
 
 2) Configure environment
-Create `app/.env.local` with:
+Create `.env.local` in the project root with these keys (values are yours to fill in):
 ```bash
-
+DATABASE_URL=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=
 ```
 
 3) Prisma
@@ -33,6 +43,7 @@ Create `app/.env.local` with:
 npx prisma generate
 npx prisma migrate dev --name init
 ```
+> Note: the `Session` model has an `accessCode` column for two-code auth. After pulling these changes run `npx prisma migrate dev` again to apply it.
 
 4) Run
 ```bash
