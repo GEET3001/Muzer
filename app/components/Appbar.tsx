@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { signIn, signOut, useSession } from "next-auth/react";
-import { Music2, LogIn, LogOut, Menu, X } from 'lucide-react';
+import Link from "next/link";
+import { Disc3, LogIn, LogOut, Menu, X, KeyRound } from 'lucide-react';
 
 export function Appbar() {
   const session = useSession();
@@ -13,14 +14,14 @@ export function Appbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
-          <div className="flex items-center gap-3 cursor-pointer group">
-            <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-2 rounded-lg group-hover:scale-110 transition-transform duration-200">
-              <Music2 className="w-7 h-7 text-white" />
+          <Link href="/" className="flex items-center gap-3 cursor-pointer group">
+            <div className="bg-gradient-to-r from-pink-500 to-purple-500 p-2 rounded-lg group-hover:rotate-180 transition-transform duration-500">
+              <Disc3 className="w-7 h-7 text-white" />
             </div>
             <span className="text-2xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 text-transparent bg-clip-text">
-              Muzi
+              Muzer
             </span>
-          </div>
+          </Link>
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-8">
@@ -28,6 +29,13 @@ export function Appbar() {
             
             {session.data?.user ? (
               <div className="flex items-center gap-4">
+                <Link
+                  href="/join"
+                  className="flex items-center gap-2 text-white/90 hover:text-white border border-white/20 hover:border-cyan-400/60 px-5 py-2.5 rounded-full font-semibold transition-all duration-200"
+                >
+                  <KeyRound className="w-4 h-4" />
+                  Join Stream
+                </Link>
                 <div className="flex items-center gap-2">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-r from-pink-500 to-purple-500 flex items-center justify-center text-white font-bold">
                     {session.data.user.name?.charAt(0).toUpperCase() || 'U'}
@@ -82,6 +90,14 @@ export function Appbar() {
                     </div>
                     <span className="text-white font-medium">{session.data.user.name || 'User'}</span>
                   </div>
+                  <Link
+                    href="/join"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="w-full flex items-center justify-center gap-2 border border-white/20 text-white px-6 py-3 rounded-full font-semibold transition-all duration-200"
+                  >
+                    <KeyRound className="w-4 h-4" />
+                    Join Stream
+                  </Link>
                   <button
                     onClick={() => signOut({ callbackUrl: "/" })}
                     className="w-full flex items-center justify-center gap-2 bg-white bg-opacity-10 hover:bg-opacity-20 border border-white border-opacity-20 text-white px-6 py-3 rounded-full font-semibold transition-all duration-200"
