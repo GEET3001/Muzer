@@ -154,6 +154,8 @@ flowchart LR
 | `DELETE /api/sessions` | host | End room + delete its data |
 | `POST /api/sessions/join` | user | Join `{ code, accessCode }` |
 | `GET /api/streams?code=` | member | Queue (`upvotes`, `myVote`) |
+| `GET /api/streams/events?code=` | member | SSE stream of queue-changed events |
+| `GET /api/streams/search?code=&q=` | member | YouTube search results |
 | `POST /api/streams` | member | Add `{ url, sessionCode }` |
 | `DELETE /api/streams` | host | Remove `{ streamId }` |
 | `POST /api/streams/upvote` | member | Up / toggle `{ streamId }` |

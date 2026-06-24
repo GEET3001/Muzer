@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomInt } from "crypto";
 import { prismaClient } from "@/app/lib/db";
 import { authOptions } from "@/app/lib/auth";
+import { publishQueueChanged } from "@/app/lib/redis";
 import { getServerSession } from "next-auth";
 
 // Join code: easy to read aloud, no ambiguous chars (no 0/O/1/I). Uses a CSPRNG
@@ -135,5 +136,7 @@ export async function DELETE(req: NextRequest) {
     prismaClient.session.delete({ where: { id: target.id } }),
   ]);
 
+  // Push the change so any guests still viewing the room refetch and see it end.
+  await publishQueueChanged(target.code);
   return NextResponse.json({ message: "Session ended" });
 }

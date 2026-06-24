@@ -2,10 +2,10 @@
 
 import { useParams } from "next/navigation";
 import useSWR from "swr";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { Appbar } from "@/app/components/Appbar";
-import { ThumbsUp, ThumbsDown, Plus, Disc3, Music2, KeyRound, LogIn } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Plus, Disc3, Music2, KeyRound, LogIn, Search, X } from "lucide-react";
 
 type QueueItem = {
   id: string;
@@ -17,6 +17,8 @@ type QueueItem = {
   upvotes: number;
   myVote: number;
 };
+
+type SearchResult = { videoId: string; title: string; thumbnail: string };
 
 class HttpError extends Error {
   status: number;
@@ -37,6 +39,9 @@ export default function SessionPage() {
   const { data: auth, status } = useSession();
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [adding, setAdding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
 
   // Access gate state (second factor).
   const [accessCode, setAccessCode] = useState("");
@@ -46,7 +51,8 @@ export default function SessionPage() {
   const { data, error, mutate } = useSWR<{ items: QueueItem[] }>(
     code && auth?.user ? `/api/streams?code=${code}` : null,
     fetcher,
-    { refreshInterval: 2000, shouldRetryOnError: false }
+    // Real-time push (below) drives updates; slow poll is just a safety net.
+    { refreshInterval: 15000, shouldRetryOnError: false }
   );
   const items = data?.items ?? [];
 
@@ -57,6 +63,16 @@ export default function SessionPage() {
   // 404 means the room no longer exists — the host ended (disabled) the session.
   const sessionGone =
     !!auth?.user && error instanceof HttpError && error.status === 404;
+
+  // Live updates once joined: refetch when the server pushes a change. Skipped
+  // until the user is a member (the SSE endpoint is participant-gated too).
+  const joined = !!auth?.user && !needsAccess && !sessionGone;
+  useEffect(() => {
+    if (!code || !joined) return;
+    const es = new EventSource(`/api/streams/events?code=${code}`);
+    es.onmessage = () => mutate();
+    return () => es.close();
+  }, [code, joined, mutate]);
 
   const submitAccess = async () => {
     setJoinError(null);
@@ -100,17 +116,18 @@ export default function SessionPage() {
     mutate();
   };
 
-  const addSong = async () => {
-    if (!youtubeUrl.trim() || !auth?.user) return;
+  const addSong = async (urlArg?: string) => {
+    const url = (urlArg ?? youtubeUrl).trim();
+    if (!url || !auth?.user) return;
     setAdding(true);
     try {
       const res = await fetch("/api/streams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: youtubeUrl, sessionCode: code }),
+        body: JSON.stringify({ url, sessionCode: code }),
       });
       if (res.ok) {
-        setYoutubeUrl("");
+        if (!urlArg) setYoutubeUrl("");
         mutate();
       } else {
         const j = await res.json().catch(() => ({}));
@@ -119,6 +136,28 @@ export default function SessionPage() {
     } finally {
       setAdding(false);
     }
+  };
+
+  // In-app YouTube search so users can pick a track instead of pasting a URL.
+  const runSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearching(true);
+    try {
+      const res = await fetch(
+        `/api/streams/search?code=${code}&q=${encodeURIComponent(q)}`
+      );
+      const j = await res.json().catch(() => ({ items: [] }));
+      setSearchResults(res.ok ? j.items ?? [] : []);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const addFromSearch = async (videoId: string) => {
+    await addSong(`https://www.youtube.com/watch?v=${videoId}`);
+    setSearchResults([]);
+    setSearchQuery("");
   };
 
   return (
@@ -207,12 +246,75 @@ export default function SessionPage() {
                   onKeyDown={(e) => e.key === "Enter" && addSong()}
                 />
                 <button
-                  onClick={addSong}
+                  onClick={() => addSong()}
                   disabled={adding}
                   className="bg-gradient-to-r from-pink-500 to-purple-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg"
                 >
                   {adding ? "Adding..." : "Add"}
                 </button>
+              </div>
+
+              {/* Or search YouTube and pick a result */}
+              <div className="mt-3 pt-3 border-t border-white/10">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-400" />
+                    <input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="…or search YouTube by name"
+                      className="w-full bg-gray-900 border border-cyan-500/30 rounded-lg pl-9 pr-9 py-2 text-white placeholder-purple-400 focus:outline-none focus:border-cyan-500"
+                      onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => {
+                          setSearchQuery("");
+                          setSearchResults([]);
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-400 hover:text-white"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    onClick={runSearch}
+                    disabled={searching || !searchQuery.trim()}
+                    className="bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold"
+                  >
+                    {searching ? "Searching…" : "Search"}
+                  </button>
+                </div>
+
+                {searchResults.length > 0 && (
+                  <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {searchResults.map((r) => (
+                      <div
+                        key={r.videoId}
+                        className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg p-2"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={r.thumbnail}
+                          alt={r.title}
+                          className="w-16 h-10 rounded object-cover flex-shrink-0"
+                        />
+                        <span className="flex-1 min-w-0 text-white text-sm line-clamp-2">
+                          {r.title}
+                        </span>
+                        <button
+                          onClick={() => addFromSearch(r.videoId)}
+                          disabled={adding}
+                          className="flex-shrink-0 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-md text-sm font-semibold"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

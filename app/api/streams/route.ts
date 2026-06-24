@@ -4,7 +4,7 @@ import { prismaClient } from "@/app/lib/db";
 import { authOptions } from "@/app/lib/auth";
 import { getServerSession } from "next-auth";
 import { isParticipant } from "@/app/lib/access";
-import { cacheGet, cacheSet, rateLimit } from "@/app/lib/redis";
+import { cacheGet, cacheSet, rateLimit, publishQueueChanged } from "@/app/lib/redis";
 import youtubesearchapi from "youtube-search-api";
 
 const YT_REGEX =
@@ -139,6 +139,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    await publishQueueChanged(foundSession.code);
     return NextResponse.json({ message: "Added Stream", id: stream.id });
   } catch (e) {
     console.error("POST /api/streams failed:", e);
@@ -249,6 +250,7 @@ export async function DELETE(req: NextRequest) {
       prismaClient.stream.delete({ where: { id: stream.id } }),
     ]);
 
+    await publishQueueChanged(stream.session.code);
     return NextResponse.json({ message: "Stream removed" });
   } catch (e) {
     console.error("DELETE /api/streams failed:", e);

@@ -16,6 +16,8 @@ import {
   Trash2,
   SkipForward,
   Power,
+  Search,
+  X,
 } from "lucide-react";
 import { Appbar } from "../components/Appbar";
 
@@ -29,6 +31,8 @@ type QueueItem = {
   upvotes: number;
   myVote: number;
 };
+
+type SearchResult = { videoId: string; title: string; thumbnail: string };
 
 const fetcher = (url: string) =>
   fetch(url).then((res) => {
@@ -46,6 +50,9 @@ export default function Dashboard() {
   const [sessionCode, setSessionCode] = useState<string | null>(null);
   const [accessCode, setAccessCode] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
 
   // Redirect if unauthenticated
   useEffect(() => {
@@ -104,10 +111,20 @@ export default function Dashboard() {
   const { data, mutate } = useSWR<{ items: QueueItem[] }>(
     sessionCode ? `/api/streams?code=${sessionCode}` : null,
     fetcher,
-    { refreshInterval: 2000 }
+    // Real-time push (below) drives updates; this is just a slow safety-net poll.
+    { refreshInterval: 15000 }
   );
 
   const sortedQueue = useMemo<QueueItem[]>(() => data?.items ?? [], [data]);
+
+  // Live updates: refetch the queue the moment the server pushes a change
+  // (add / vote / remove / end), instead of hammering the poll every 2s.
+  useEffect(() => {
+    if (!sessionCode) return;
+    const es = new EventSource(`/api/streams/events?code=${sessionCode}`);
+    es.onmessage = () => mutate();
+    return () => es.close();
+  }, [sessionCode, mutate]);
 
   // Disable the room: deletes the session and ALL its data (tracks, votes,
   // members) server-side, then spins up a fresh empty room with new codes.
@@ -134,17 +151,18 @@ export default function Dashboard() {
     }
   };
 
-  const addSong = async () => {
-    if (!youtubeUrl.trim() || !sessionCode || !auth?.user) return;
+  const addSong = async (urlArg?: string) => {
+    const url = (urlArg ?? youtubeUrl).trim();
+    if (!url || !sessionCode || !auth?.user) return;
     setLoading(true);
     try {
       const res = await fetch("/api/streams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: youtubeUrl, sessionCode }),
+        body: JSON.stringify({ url, sessionCode }),
       });
       if (res.ok) {
-        setYoutubeUrl("");
+        if (!urlArg) setYoutubeUrl("");
         mutate();
       } else {
         const j = await res.json().catch(() => ({}));
@@ -153,6 +171,28 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // In-app YouTube search so users can pick a track instead of pasting a URL.
+  const runSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q || !sessionCode) return;
+    setSearching(true);
+    try {
+      const res = await fetch(
+        `/api/streams/search?code=${sessionCode}&q=${encodeURIComponent(q)}`
+      );
+      const j = await res.json().catch(() => ({ items: [] }));
+      setSearchResults(res.ok ? j.items ?? [] : []);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const addFromSearch = async (videoId: string) => {
+    await addSong(`https://www.youtube.com/watch?v=${videoId}`);
+    setSearchResults([]);
+    setSearchQuery("");
   };
 
   const upvote = async (id: string) => {
@@ -357,12 +397,76 @@ export default function Dashboard() {
                     onKeyDown={(e) => e.key === "Enter" && addSong()}
                   />
                   <button
-                    onClick={addSong}
+                    onClick={() => addSong()}
                     disabled={loading || !auth?.user}
                     className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-6 sm:px-8 py-3 rounded-lg font-semibold shadow-lg transition-all duration-200 text-sm sm:text-base w-full sm:w-auto"
                   >
                     {loading ? "Adding..." : auth?.user ? "Add to Queue" : "Sign in to add"}
                   </button>
+                </div>
+
+                {/* Or search YouTube and pick a result */}
+                <div className="mt-4 pt-4 border-t border-white/10">
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-400" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="…or search YouTube by name"
+                        className="w-full bg-gray-900 bg-opacity-90 border-2 border-cyan-500 border-opacity-30 text-white placeholder-purple-400 pl-9 pr-9 py-3 rounded-lg focus:outline-none focus:border-cyan-500 transition-all text-sm sm:text-base"
+                        onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => {
+                            setSearchQuery("");
+                            setSearchResults([]);
+                          }}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-400 hover:text-white"
+                          aria-label="Clear search"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      onClick={runSearch}
+                      disabled={searching || !searchQuery.trim()}
+                      className="bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-all text-sm sm:text-base w-full sm:w-auto"
+                    >
+                      {searching ? "Searching…" : "Search"}
+                    </button>
+                  </div>
+
+                  {searchResults.length > 0 && (
+                    <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+                      {searchResults.map((r) => (
+                        <div
+                          key={r.videoId}
+                          className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg p-2 transition-all"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={r.thumbnail}
+                            alt={r.title}
+                            className="w-16 h-10 rounded object-cover flex-shrink-0"
+                          />
+                          <span className="flex-1 min-w-0 text-white text-sm line-clamp-2">
+                            {r.title}
+                          </span>
+                          <button
+                            onClick={() => addFromSearch(r.videoId)}
+                            disabled={loading}
+                            className="flex-shrink-0 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-md text-sm font-semibold"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

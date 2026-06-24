@@ -1,7 +1,7 @@
 import { prismaClient } from "@/app/lib/db";
 import { authOptions } from "@/app/lib/auth";
 import { isParticipant } from "@/app/lib/access";
-import { rateLimit } from "@/app/lib/redis";
+import { rateLimit, publishQueueChanged } from "@/app/lib/redis";
 import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
 
     if (existing?.value === -1) {
       await prismaClient.upvotes.delete({ where: { id: existing.id } });
+      await publishQueueChanged(stream.session.code);
       return NextResponse.json({ message: "vote removed", myVote: 0 });
     }
 
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
       create: { userId: user.id, streamId: parsed.data.streamId, value: -1 },
     });
 
+    await publishQueueChanged(stream.session.code);
     return NextResponse.json({ message: "downvoted", myVote: -1 });
   } catch (e) {
     console.error("POST /api/streams/downvote failed:", e);
