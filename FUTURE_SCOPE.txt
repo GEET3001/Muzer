@@ -1,0 +1,273 @@
+==============================================================================
+ MUZER — FUTURE SCOPE, FEATURE ROADMAP & AI/ML INTEGRATION POSSIBILITIES
+==============================================================================
+Last updated: 2026-06-24
+
+This document covers three things:
+  PART A — Where the project stands today
+  PART B — Features to add (now / next / later), prioritized
+  PART C — AI / ML / Deep Learning / LLM integration possibilities & scope
+
+It is a planning document. Nothing here is required for the app to run; it is a
+menu of directions, with rough effort and value for each.
+
+
+==============================================================================
+ PART A — WHERE MUZER STANDS TODAY
+==============================================================================
+
+What exists:
+  - Google sign-in (NextAuth).
+  - Host creates ONE room; shares a join code + numeric access code (2-factor).
+  - Guests join, queue YouTube tracks, and vote (one up/down per song per user).
+  - Queue ordered by net score; host controls the deck (next/remove) and can
+    End Session (wipes all room data).
+  - PostgreSQL (Prisma) is the source of truth. Redis is optional (rate limits
+    + YouTube metadata cache).
+  - Live updates via SWR polling every 2s.
+
+Known structural limitations (these shape the roadmap below):
+  1. Polling, not push — every viewer hits the server every 2s. O(viewers) load.
+  2. YouTube only, by design — a single streaming source (see note at end of
+     Part B on why other sources don't fit the broadcast model).
+  3. No presence ("who's listening"), no chat, no history/persistence of past
+     rooms (End Session deletes everything by design).
+  4. No moderation — any participant can queue any video.
+  5. No analytics, no recommendations — the queue is purely manual + votes.
+
+
+==============================================================================
+ PART B — FEATURE ROADMAP (non-AI)
+==============================================================================
+
+------------------------------------------------------------------------------
+ NOW (high value, low/medium effort — do these first)
+------------------------------------------------------------------------------
+
+1. REAL-TIME UPDATES (replace 2s polling)
+   Why: polling is the #1 scaling bottleneck and adds up to 2s of lag.
+   How: Redis Pub/Sub (already have the optional Redis layer) + a Server-Sent
+        Events (SSE) endpoint per room. On any mutation (add/vote/remove/end),
+        publish "queue-changed"; the SSE route forwards it; the client swaps the
+        SWR poll for an EventSource and only refetches on an event.
+   Effort: Medium. Value: High.
+
+2. PRESENCE — "who's listening" + live count
+   Why: social proof; hosts want to see the room is alive.
+   How: Redis sets with TTL (heartbeat every ~15s), or piggyback on the SSE
+        connection count. Show avatars / a head-count in the UI.
+   Effort: Low-Medium. Value: Medium-High.
+
+3. "ADDED BY" ATTRIBUTION (already in the DB)
+   Why: Stream.addedById is stored but never surfaced. Show who queued each
+        track — accountability + fun.
+   Effort: Low. Value: Medium.
+
+4. YOUTUBE PLAYLIST IMPORT
+   Why: bulk-fill the queue instead of pasting one URL at a time.
+   How: accept a YouTube playlist URL, expand it server-side, and queue each
+        video (respect the existing per-user rate limit + dedup).
+   Effort: Medium. Value: Medium-High.
+
+------------------------------------------------------------------------------
+ NEXT (medium effort, strong value)
+------------------------------------------------------------------------------
+
+5. HOST MODERATION CONTROLS
+   - Ban a guest, lock the queue, require approval before a track goes live,
+     max-tracks-per-user, cooldown between adds (the rate-limit plumbing exists).
+   Effort: Medium. Value: High for public rooms.
+
+6. SEARCH-IN-APP (instead of pasting URLs)
+   - A search box that calls YouTube search and lets users pick a result
+     rather than hunting for a URL. Big UX win.
+   Effort: Medium. Value: High.
+
+7. PLAYBACK SYNC ACROSS DEVICES
+   - Today only the host's iframe actually plays. Optionally broadcast playback
+     position so guests hear the same thing in sync (or make it host-screen-only
+     and document that). Sync is hard (latency, buffering) — decide the model.
+   Effort: High. Value: Medium-High.
+
+8. ROOM HISTORY / "SAVE THIS QUEUE"
+   - Let a host export a finished session as a YouTube playlist before it is
+     wiped. Changes the "delete everything" flow into "archive then wipe".
+   Effort: Medium. Value: Medium.
+
+------------------------------------------------------------------------------
+ LATER (nice-to-have / scale / polish)
+------------------------------------------------------------------------------
+
+9.  Multiple rooms per host; named/themed rooms.
+10. Reactions / lightweight chat per room (Redis Pub/Sub again).
+11. Mobile apps (React Native) or PWA install.
+12. Theming / white-label for events.
+13. Observability: per-room metrics, vote analytics dashboard.
+14. Accessibility pass + i18n.
+
+------------------------------------------------------------------------------
+ NOTE — WHY YOUTUBE IS THE ONLY STREAMING SOURCE
+------------------------------------------------------------------------------
+  Muzer's model is "host queue, everyone can listen via an embed". YouTube's
+  iframe player is the only mainstream source that supports this: it plays full
+  tracks to any viewer with no per-listener account and no subscription.
+  Paid subscription music services do NOT allow broadcasting one stream to many
+  listeners — playback is tied to an individual account/device and typically
+  requires a paid tier, so they can't back this product without each listener
+  bringing their own paid account. YouTube-only is therefore a deliberate
+  architectural choice, not a gap to fill.
+
+
+==============================================================================
+ PART C — AI / ML / DEEP LEARNING / LLM INTEGRATION
+==============================================================================
+
+Muzer is a strong candidate for AI features because it sits on a stream of
+structured signals (who queued what, what got upvoted, what got skipped, room
+"vibe") AND on unstructured content (song titles, future chat). Below, each idea
+is tagged with the TYPE of AI it needs, concrete integration, and rough scope.
+
+A note on model choice (for the LLM features): when building these, default to
+the latest Claude models via the official Anthropic SDK (@anthropic-ai/sdk).
+Sensible mapping for this app:
+  - High-volume / cheap / latency-sensitive (moderation, NL-to-query parsing,
+    classification): Claude Haiku 4.5  (model id: claude-haiku-4-5;
+    ~$1 / $5 per 1M input/output tokens).
+  - Balanced reasoning (summaries, vibe descriptions): Claude Sonnet 4.6
+    (model id: claude-sonnet-4-6; ~$3 / $15).
+  - Hardest reasoning / conversational DJ agent / multi-step tool use:
+    Claude Opus 4.8 (model id: claude-opus-4-8; ~$5 / $25).
+Keep keys server-side (a Next.js route handler), never in the client.
+
+------------------------------------------------------------------------------
+ C1. LLM FEATURES (Claude / Anthropic API)  — fastest to ship, high "wow"
+------------------------------------------------------------------------------
+
+(a) NATURAL-LANGUAGE SONG REQUESTS  ["play something chill for studying"]
+    Type: LLM (tool use / structured output).
+    How: user types a vibe in plain English; Claude returns a structured search
+         query (or a short list of candidate tracks) which you resolve against
+         YouTube search and queue. Use strict tool-use / structured
+         outputs so the result is machine-usable JSON.
+    Model: Haiku 4.5 (cheap, fast). Scope: Small-Medium. Value: High.
+
+(b) CONVERSATIONAL DJ ASSISTANT  ["@DJ skip ahead to something upbeat"]
+    Type: LLM agent + tool use.
+    How: give Claude tools that map to your existing API (add_track, search,
+         get_queue, vote_summary). It can curate, answer "what's playing?",
+         build a themed set, or fill a dead queue on request.
+    Model: Opus 4.8 for the agent loop. Scope: Medium. Value: High / flagship.
+
+(c) AUTO-FILL THE EMPTY QUEUE  ["the deck is empty — drop a track"]
+    Type: LLM + your recommender (C2).
+    How: when the queue runs dry, Claude proposes the next few tracks based on
+         what was already played and upvoted in THIS room. Host one-click adds.
+    Model: Sonnet 4.6. Scope: Small (once search exists). Value: High.
+
+(d) CHAT / TITLE MODERATION
+    Type: LLM classification (or a dedicated moderation model).
+    How: before a track or chat message goes live, classify for slurs / NSFW /
+         spam. Pre-screen titles on add; pre-screen chat on send.
+    Model: Haiku 4.5 (cheap, high volume). Scope: Small. Value: High for public
+    rooms. (Pairs with the host-moderation feature B5.)
+
+(e) SESSION RECAP / SHAREABLE SUMMARY
+    Type: LLM summarization.
+    How: at End Session, generate "Tonight's set: 23 tracks, top vote 'X',
+         biggest genre swing was…", as a shareable card. Turns the destructive
+         end-of-room moment into something keepable (pairs with B8).
+    Model: Sonnet 4.6. Scope: Small. Value: Medium-High.
+
+(f) VIBE / MOOD LABELLING OF A ROOM
+    Type: LLM classification over the queue.
+    How: label the room's current mood ("late-night chill", "hype") from the
+         track list; drive UI theming or recommendations.
+    Model: Haiku 4.5. Scope: Small. Value: Medium.
+
+------------------------------------------------------------------------------
+ C2. RECOMMENDER SYSTEMS (classical ML)  — the long-term "smart queue" engine
+------------------------------------------------------------------------------
+
+This is the highest-value ML investment but needs DATA first (log plays, votes,
+skips, who-with-whom). Build the logging now even if you build the model later.
+
+(a) NEXT-TRACK / AUTO-DJ RECOMMENDATIONS
+    Type: Collaborative filtering (matrix factorization / ALS) and/or
+          content-based similarity using audio/track EMBEDDINGS.
+    How: "users who upvoted these also liked…", or embed each track in a vector
+         space and pick nearest neighbors to what's winning votes now.
+    Tooling: start simple (track metadata / Last.fm-style features, or a hosted
+             embeddings API + a vector index — pgvector on your existing
+             Postgres is a natural fit). Graduate to a trained model later.
+    Scope: Medium-Large. Value: Very High (this is the product moat).
+
+(b) SKIP / "WILL THIS BANGER LAND?" PREDICTION
+    Type: Supervised ML (gradient-boosted trees or a small NN).
+    How: predict the probability a queued track gets net-positive votes given
+         room context; surface as a hint to the host, or auto-rank suggestions.
+    Scope: Medium. Value: Medium-High.
+
+(c) PERSONALIZATION
+    Type: Per-user preference vectors learned from their vote history.
+    Scope: Medium. Value: High once you have repeat users.
+
+------------------------------------------------------------------------------
+ C3. AUDIO DEEP LEARNING  — heaviest; do only if it differentiates you
+------------------------------------------------------------------------------
+
+(a) GENRE / MOOD / BPM / KEY DETECTION from audio.
+    Type: Deep audio models (CNN/transformer on spectrograms) — or just use an
+          existing audio-analysis API (e.g. track features) instead of training.
+    Use: smarter recommendations, "smooth transition" ordering (match BPM/key),
+         auto-genre tags.
+    Scope: Large (training) / Medium (using an API). Value: Medium-High.
+
+(b) BEAT-MATCHED TRANSITIONS / CROSSFADE ("real DJ" mode).
+    Type: DSP + ML for tempo/beat alignment.
+    Scope: Large, specialized. Value: High but niche.
+
+(c) AUDIO FINGERPRINTING for dedup of re-uploads of the same song on YouTube
+    (same track, different upload/URL).
+    Type: Audio fingerprinting (e.g. Chromaprint-style).
+    Scope: Medium. Value: Low-Medium.
+
+------------------------------------------------------------------------------
+ C4. TRUST & SAFETY / ANTI-ABUSE ML  — protects the voting integrity
+------------------------------------------------------------------------------
+
+(a) VOTE-MANIPULATION / BOT DETECTION
+    Type: Anomaly detection (statistical or ML) over voting patterns.
+    How: flag coordinated voting, sockpuppets, suspicious bursts. Today only
+         rate limits exist; an ML layer catches what fixed thresholds miss.
+    Scope: Medium. Value: High for public/competitive rooms.
+
+(b) ABUSE/SPAM CLASSIFICATION — overlaps with the LLM moderation in C1(d).
+
+------------------------------------------------------------------------------
+ SUGGESTED AI SEQUENCING
+------------------------------------------------------------------------------
+  Step 1 (now): Start LOGGING events (plays, votes, skips, room context). Cheap,
+                unblocks every ML idea later. Without data, C2/C3/C4 can't exist.
+  Step 2: Ship an LLM quick win — C1(a) NL requests or C1(c) auto-fill — using
+          Claude Haiku/Sonnet. Low effort, immediate "smart" feel.
+  Step 3: Add C1(d) moderation + C1(e) recap (small, high polish).
+  Step 4: Build C2(a) recommender on the logged data (pgvector + embeddings).
+  Step 5: Consider C1(b) full conversational DJ agent (Opus 4.8) as the flagship.
+  Step 6: Audio DL (C3) and anti-abuse ML (C4) only once scale/demand justify it.
+
+------------------------------------------------------------------------------
+ COST / RISK NOTES
+------------------------------------------------------------------------------
+  - LLM calls cost per token — cache aggressively (you already have Redis), use
+    Haiku for high-volume paths, and keep prompts small. Put a per-user rate
+    limit on AI features (reuse the existing limiter).
+  - Never expose API keys client-side; all model calls go through server routes.
+  - Recommenders/audio models need infra (vector DB, training, GPUs). Prefer
+    hosted APIs first; train your own only when the data and demand are real.
+  - Privacy: if you log behavior for ML, say so, and respect the existing
+    "End Session deletes everything" promise — or get consent to retain
+    anonymized/aggregated signals for training.
+
+==============================================================================
+ END
+==============================================================================

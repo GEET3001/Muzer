@@ -60,8 +60,7 @@ enum Provider {
 }
 
 enum StreamType {
- Spotify
- Youtube 
+ Youtube
 }
 
 model Session {
