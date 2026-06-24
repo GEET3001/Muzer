@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,7 @@ import {
   KeyRound,
   Trash2,
   SkipForward,
+  Power,
 } from "lucide-react";
 import { Appbar } from "../components/Appbar";
 
@@ -26,6 +27,7 @@ type QueueItem = {
   bigImg: string;
   extractedId: string;
   upvotes: number;
+  myVote: number;
 };
 
 const fetcher = (url: string) =>
@@ -43,6 +45,7 @@ export default function Dashboard() {
   const [playerKey, setPlayerKey] = useState(0);
   const [sessionCode, setSessionCode] = useState<string | null>(null);
   const [accessCode, setAccessCode] = useState<string | null>(null);
+  const [ending, setEnding] = useState(false);
 
   // Redirect if unauthenticated
   useEffect(() => {
@@ -53,27 +56,40 @@ export default function Dashboard() {
 
   // Load the host's existing room (with both codes) or create one. Reusing the
   // server as the source of truth avoids the cross-account localStorage bug.
+  const loadOrCreateRoom = useCallback(async (): Promise<boolean> => {
+    let res = await fetch("/api/sessions");
+    let json = res.ok ? await res.json() : null;
+    if (!json?.code) {
+      res = await fetch("/api/sessions", { method: "POST" });
+      json = res.ok ? await res.json() : null;
+    }
+    if (json?.code) {
+      setSessionCode(json.code);
+      setAccessCode(json.accessCode);
+      return true;
+    }
+    return false;
+  }, []);
+
   useEffect(() => {
     if (status !== "authenticated") return;
 
     let cancelled = false;
-    const init = async () => {
-      let res = await fetch("/api/sessions");
-      let json = res.ok ? await res.json() : null;
-      if (!json?.code) {
-        res = await fetch("/api/sessions", { method: "POST" });
-        json = res.ok ? await res.json() : null;
-      }
-      if (json?.code && !cancelled) {
+    (async () => {
+      const res = await fetch("/api/sessions");
+      const json = res.ok ? await res.json() : null;
+      if (cancelled) return;
+      if (json?.code) {
         setSessionCode(json.code);
         setAccessCode(json.accessCode);
+      } else {
+        await loadOrCreateRoom();
       }
-    };
-    init();
+    })();
     return () => {
       cancelled = true;
     };
-  }, [status]);
+  }, [status, loadOrCreateRoom]);
 
   const copyCode = async (value: string, which: "code" | "access") => {
     try {
@@ -92,6 +108,31 @@ export default function Dashboard() {
   );
 
   const sortedQueue = useMemo<QueueItem[]>(() => data?.items ?? [], [data]);
+
+  // Disable the room: deletes the session and ALL its data (tracks, votes,
+  // members) server-side, then spins up a fresh empty room with new codes.
+  const endSession = async () => {
+    const ok = window.confirm(
+      "End this session? Everything in it — the queue, votes, and who joined — is permanently deleted. A new room with fresh codes will be created."
+    );
+    if (!ok) return;
+    setEnding(true);
+    try {
+      const res = await fetch("/api/sessions", { method: "DELETE" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error ?? "Failed to end session");
+        return;
+      }
+      // Clear the now-stale queue and credentials, then start a fresh room.
+      setSessionCode(null);
+      setAccessCode(null);
+      await mutate({ items: [] }, { revalidate: false });
+      await loadOrCreateRoom();
+    } finally {
+      setEnding(false);
+    }
+  };
 
   const addSong = async () => {
     if (!youtubeUrl.trim() || !sessionCode || !auth?.user) return;
@@ -225,6 +266,18 @@ export default function Dashboard() {
                   <Copy className="w-5 h-5 text-purple-300 group-hover:text-white flex-shrink-0" />
                 )}
               </button>
+
+              <button
+                onClick={endSession}
+                disabled={!sessionCode || ending}
+                className="group flex items-center justify-center gap-2 bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 hover:border-rose-400 text-rose-200 hover:text-white rounded-2xl px-5 py-3 transition-all disabled:opacity-50"
+                title="End this session and delete everything in it"
+              >
+                <Power className="w-5 h-5 flex-shrink-0" />
+                <span className="font-semibold">
+                  {ending ? "Ending…" : "End Session"}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -353,8 +406,13 @@ export default function Dashboard() {
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
                               <button
                                 onClick={() => upvote(song.id)}
-                                className="bg-green-500 bg-opacity-20 hover:bg-opacity-40 text-green-400 p-1 rounded transition-all flex-shrink-0"
+                                className={`p-1 rounded transition-all flex-shrink-0 ${
+                                  song.myVote === 1
+                                    ? "bg-green-500 text-white"
+                                    : "bg-green-500 bg-opacity-20 hover:bg-opacity-40 text-green-400"
+                                }`}
                                 aria-label="Upvote"
+                                aria-pressed={song.myVote === 1}
                               >
                                 <ThumbsUp className="w-4 h-4" />
                               </button>
@@ -365,8 +423,13 @@ export default function Dashboard() {
                               </div>
                               <button
                                 onClick={() => downvote(song.id)}
-                                className="bg-red-500 bg-opacity-20 hover:bg-opacity-40 text-red-400 p-1 rounded transition-all flex-shrink-0"
-                                aria-label="Remove upvote"
+                                className={`p-1 rounded transition-all flex-shrink-0 ${
+                                  song.myVote === -1
+                                    ? "bg-red-500 text-white"
+                                    : "bg-red-500 bg-opacity-20 hover:bg-opacity-40 text-red-400"
+                                }`}
+                                aria-label="Downvote"
+                                aria-pressed={song.myVote === -1}
                               >
                                 <ThumbsDown className="w-4 h-4" />
                               </button>

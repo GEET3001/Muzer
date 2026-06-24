@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prismaClient } from "@/app/lib/db";
+import { authOptions } from "@/app/lib/auth";
+import { rateLimit } from "@/app/lib/redis";
 import { getServerSession } from "next-auth";
 
 const JoinSchema = z.object({
@@ -9,7 +11,7 @@ const JoinSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession();
+  const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -19,6 +21,15 @@ export async function POST(req: NextRequest) {
   });
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  // The access code is only a 6-digit PIN, so throttle hard to make brute-force
+  // impractical: 10 attempts / minute per user.
+  if (!(await rateLimit(`join:${user.id}`, 10, 60))) {
+    return NextResponse.json(
+      { error: "Too many attempts. Wait a minute and try again." },
+      { status: 429 }
+    );
   }
 
   const parsed = JoinSchema.safeParse(await req.json().catch(() => null));

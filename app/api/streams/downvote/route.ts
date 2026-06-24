@@ -1,5 +1,7 @@
 import { prismaClient } from "@/app/lib/db";
+import { authOptions } from "@/app/lib/auth";
 import { isParticipant } from "@/app/lib/access";
+import { rateLimit } from "@/app/lib/redis";
 import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -9,7 +11,7 @@ const DownvoteSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession();
+  const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ message: "unauthenticated" }, { status: 401 });
   }
@@ -19,6 +21,14 @@ export async function POST(req: NextRequest) {
   });
   if (!user) {
     return NextResponse.json({ message: "unauthenticated" }, { status: 401 });
+  }
+
+  // Throttle vote spam: 60 votes / minute per user.
+  if (!(await rateLimit(`vote:${user.id}`, 60, 60))) {
+    return NextResponse.json(
+      { message: "Slow down — too many votes" },
+      { status: 429 }
+    );
   }
 
   const parsed = DownvoteSchema.safeParse(await req.json().catch(() => null));
@@ -39,17 +49,32 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // deleteMany is idempotent — removing a non-existent upvote is a no-op
-    // rather than throwing, so repeated downvotes won't 500.
-    await prismaClient.upvotes.deleteMany({
-      where: { userId: user.id, streamId: parsed.data.streamId },
+    // One vote per user per stream. Clicking downvote when a downvote already
+    // exists toggles it off; otherwise it sets/flips the vote to -1.
+    const existing = await prismaClient.upvotes.findUnique({
+      where: {
+        userId_streamId: { userId: user.id, streamId: parsed.data.streamId },
+      },
     });
 
-    return NextResponse.json({ message: "upvote removed" });
+    if (existing?.value === -1) {
+      await prismaClient.upvotes.delete({ where: { id: existing.id } });
+      return NextResponse.json({ message: "vote removed", myVote: 0 });
+    }
+
+    await prismaClient.upvotes.upsert({
+      where: {
+        userId_streamId: { userId: user.id, streamId: parsed.data.streamId },
+      },
+      update: { value: -1 },
+      create: { userId: user.id, streamId: parsed.data.streamId, value: -1 },
+    });
+
+    return NextResponse.json({ message: "downvoted", myVote: -1 });
   } catch (e) {
     console.error("POST /api/streams/downvote failed:", e);
     return NextResponse.json(
-      { message: "error while removing upvote" },
+      { message: "error while downvoting" },
       { status: 500 }
     );
   }

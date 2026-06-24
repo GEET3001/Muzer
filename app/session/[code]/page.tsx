@@ -15,6 +15,7 @@ type QueueItem = {
   bigImg: string;
   extractedId: string;
   upvotes: number;
+  myVote: number;
 };
 
 class HttpError extends Error {
@@ -52,6 +53,10 @@ export default function SessionPage() {
   // 403 from the queue endpoint means "not a member yet" — show the gate.
   const needsAccess =
     !!auth?.user && error instanceof HttpError && error.status === 403;
+
+  // 404 means the room no longer exists — the host ended (disabled) the session.
+  const sessionGone =
+    !!auth?.user && error instanceof HttpError && error.status === 404;
 
   const submitAccess = async () => {
     setJoinError(null);
@@ -143,6 +148,18 @@ export default function SessionPage() {
           </div>
         )}
 
+        {/* Host ended the room — everything was deleted. */}
+        {sessionGone && (
+          <div className="bg-black/40 border border-white/10 rounded-2xl p-6 max-w-sm mx-auto text-center">
+            <Disc3 className="w-10 h-10 text-purple-300 mx-auto mb-3" />
+            <h2 className="text-white text-xl font-bold mb-1">Stream ended</h2>
+            <p className="text-purple-200 text-sm">
+              The host has ended this session. Ask them for a new code to join
+              again.
+            </p>
+          </div>
+        )}
+
         {/* Access gate (second factor) */}
         {needsAccess && (
           <div className="bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-6 max-w-sm mx-auto text-center">
@@ -174,7 +191,7 @@ export default function SessionPage() {
         )}
 
         {/* Joined: queue + add */}
-        {auth?.user && !needsAccess && (
+        {auth?.user && !needsAccess && !sessionGone && (
           <>
             <div className="bg-black/40 border border-white/10 rounded-2xl p-4 mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -226,8 +243,13 @@ export default function SessionPage() {
                       <div className="flex items-center gap-2 mt-2">
                         <button
                           onClick={() => upvote(s.id)}
-                          className="text-green-400 bg-green-500/20 hover:bg-green-500/30 p-1 rounded"
+                          className={`p-1 rounded transition-all ${
+                            s.myVote === 1
+                              ? "bg-green-500 text-white"
+                              : "text-green-400 bg-green-500/20 hover:bg-green-500/30"
+                          }`}
                           aria-label="Upvote"
+                          aria-pressed={s.myVote === 1}
                         >
                           <ThumbsUp className="w-4 h-4" />
                         </button>
@@ -236,8 +258,13 @@ export default function SessionPage() {
                         </span>
                         <button
                           onClick={() => downvote(s.id)}
-                          className="text-red-400 bg-red-500/20 hover:bg-red-500/30 p-1 rounded"
-                          aria-label="Remove upvote"
+                          className={`p-1 rounded transition-all ${
+                            s.myVote === -1
+                              ? "bg-red-500 text-white"
+                              : "text-red-400 bg-red-500/20 hover:bg-red-500/30"
+                          }`}
+                          aria-label="Downvote"
+                          aria-pressed={s.myVote === -1}
                         >
                           <ThumbsDown className="w-4 h-4" />
                         </button>

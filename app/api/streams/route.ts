@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prismaClient } from "@/app/lib/db";
+import { authOptions } from "@/app/lib/auth";
 import { getServerSession } from "next-auth";
 import { isParticipant } from "@/app/lib/access";
+import { cacheGet, cacheSet, rateLimit } from "@/app/lib/redis";
 import youtubesearchapi from "youtube-search-api";
 
 const YT_REGEX =
@@ -13,9 +15,49 @@ const CreateStreamSchema = z.object({
   sessionCode: z.string().min(1, "sessionCode is required"),
 });
 
+type VideoMeta = { title: string; smallImg: string; bigImg: string };
+
+// Look up (and cache) YouTube metadata for a video id. Always resolves — falls
+// back to the CDN thumbnail + a placeholder title if the lookup fails.
+async function getVideoMeta(extractedId: string): Promise<VideoMeta> {
+  const fallbackThumb = `https://img.youtube.com/vi/${extractedId}/hqdefault.jpg`;
+  const fallback: VideoMeta = {
+    title: "Untitled track",
+    smallImg: fallbackThumb,
+    bigImg: fallbackThumb,
+  };
+
+  const cached = await cacheGet<VideoMeta>(`yt:${extractedId}`);
+  if (cached) return cached;
+
+  try {
+    const res = await youtubesearchapi.GetVideoDetails(extractedId);
+    const meta: VideoMeta = { ...fallback };
+    if (res?.title) meta.title = res.title;
+
+    const thumbnails: { url: string; width: number }[] =
+      res?.thumbnail?.thumbnails ?? [];
+    if (thumbnails.length > 0) {
+      thumbnails.sort((a, b) => a.width - b.width);
+      meta.bigImg = thumbnails[thumbnails.length - 1].url ?? fallbackThumb;
+      meta.smallImg =
+        thumbnails.length > 1
+          ? thumbnails[thumbnails.length - 2].url ?? fallbackThumb
+          : meta.bigImg;
+    }
+
+    // Cache for an hour — titles/thumbnails for a given id are effectively static.
+    await cacheSet(`yt:${extractedId}`, meta, 3600);
+    return meta;
+  } catch {
+    // Metadata lookup failed — keep the CDN fallbacks and still queue the song.
+    return fallback;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
@@ -25,6 +67,14 @@ export async function POST(req: NextRequest) {
     });
     if (!authedUser) {
       return NextResponse.json({ message: "User not found" }, { status: 404 });
+    }
+
+    // Throttle track spam: 20 adds / minute per user.
+    if (!(await rateLimit(`add:${authedUser.id}`, 20, 60))) {
+      return NextResponse.json(
+        { message: "Slow down — too many tracks added" },
+        { status: 429 }
+      );
     }
 
     const parsed = CreateStreamSchema.safeParse(await req.json());
@@ -73,31 +123,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // YouTube CDN always serves a thumbnail for a valid id, so use it as a
-    // guaranteed fallback if the search API response is missing/partial.
-    const fallbackThumb = `https://img.youtube.com/vi/${extractedId}/hqdefault.jpg`;
-
-    let title = "Untitled track";
-    let smallImg = fallbackThumb;
-    let bigImg = fallbackThumb;
-
-    try {
-      const res = await youtubesearchapi.GetVideoDetails(extractedId);
-      if (res?.title) title = res.title;
-
-      const thumbnails: { url: string; width: number }[] =
-        res?.thumbnail?.thumbnails ?? [];
-      if (thumbnails.length > 0) {
-        thumbnails.sort((a, b) => a.width - b.width);
-        bigImg = thumbnails[thumbnails.length - 1].url ?? fallbackThumb;
-        smallImg =
-          thumbnails.length > 1
-            ? thumbnails[thumbnails.length - 2].url ?? fallbackThumb
-            : bigImg;
-      }
-    } catch {
-      // Metadata lookup failed — keep the CDN fallbacks and still queue the song.
-    }
+    const meta = await getVideoMeta(extractedId);
 
     const stream = await prismaClient.stream.create({
       data: {
@@ -107,9 +133,9 @@ export async function POST(req: NextRequest) {
         url: data.url,
         extractedId,
         type: "Youtube",
-        title,
-        smallImg,
-        bigImg,
+        title: meta.title,
+        smallImg: meta.smallImg,
+        bigImg: meta.bigImg,
       },
     });
 
@@ -129,7 +155,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ message: "code required" }, { status: 400 });
   }
 
-  const session = await getServerSession();
+  const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
@@ -166,9 +192,12 @@ export async function GET(req: NextRequest) {
       smallImg: s.smallImg,
       bigImg: s.bigImg,
       extractedId: s.extractedId,
-      upvotes: s.upvotes.length,
+      // Net score = sum of signed votes (+1 up, -1 down).
+      upvotes: s.upvotes.reduce((sum, v) => sum + v.value, 0),
+      // This caller's own vote, so the UI can highlight up/down: 1 | -1 | 0.
+      myVote: s.upvotes.find((v) => v.userId === user.id)?.value ?? 0,
     }))
-    // Highest voted first; ties keep insertion order (stable sort).
+    // Highest score first; ties keep insertion order (stable sort).
     .sort((a, b) => b.upvotes - a.upvotes);
 
   return NextResponse.json({ items });
@@ -181,7 +210,7 @@ const DeleteStreamSchema = z.object({
 // Host-only: remove a track from the queue (used to advance "Now Playing").
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }

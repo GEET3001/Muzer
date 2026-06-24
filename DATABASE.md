@@ -119,11 +119,29 @@ These are **complements**, not replacements, for Postgres:
 
 ### Recommendation
 
-- **Now:** PostgreSQL only. It covers 100% of current functionality correctly.
-- **When you add live push / scale rooms:** introduce **Redis** for pub/sub,
-  metadata cache, presence, and rate-limiting — alongside Postgres, not instead
-  of it. This is the standard "SQL for source-of-truth, Redis for ephemeral/hot
-  path" split.
+- **Now:** PostgreSQL is the source of truth and covers 100% of core
+  functionality. **Redis is wired in as an optional accelerator** (see below).
+- **When you add live push / scale rooms:** extend Redis to pub/sub + presence —
+  alongside Postgres, not instead of it. This is the standard "SQL for
+  source-of-truth, Redis for ephemeral/hot path" split.
 
-No code change is needed today; this section documents the decision so the
-boundary is intentional rather than accidental.
+### Redis integration (implemented, optional)
+
+Redis is now used by the app but is **entirely optional**. Set `REDIS_URL` in
+`.env` to enable it; leave it unset and every helper degrades to a safe no-op /
+in-process fallback, so the app runs identically without Redis.
+
+```
+REDIS_URL="redis://localhost:6379"      # or an Upstash/managed rediss:// URL
+```
+
+What it powers (`app/lib/redis.ts`):
+
+- **Rate limiting** — `join` (10/min/user, blunts access-code brute force),
+  `vote` (60/min/user), and `add` (20/min/user). Without Redis this falls back
+  to an in-process counter (per-instance only; resets on redeploy).
+- **YouTube metadata cache** — `GetVideoDetails` results are cached for 1h by
+  video id, so re-adding a popular track skips the slow lookup. No-op without
+  Redis.
+
+Pub/sub, presence, and replacing SWR polling remain future work.
