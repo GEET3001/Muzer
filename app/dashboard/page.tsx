@@ -234,7 +234,14 @@ export default function Dashboard() {
   const upNext = sortedQueue.slice(1);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-pink-900 to-rose-900">
+    <div className="relative min-h-screen overflow-hidden bg-[#060109] text-white">
+      {/* Cohesive neon DJ-booth backdrop: two fixed glows + subtle grid */}
+      <div className="pointer-events-none fixed inset-0 -z-10">
+        <div className="absolute -top-40 -left-40 h-[36rem] w-[36rem] rounded-full bg-cyan-500/20 blur-[120px]" />
+        <div className="absolute -bottom-48 -right-32 h-[40rem] w-[40rem] rounded-full bg-fuchsia-600/20 blur-[130px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:44px_44px]" />
+      </div>
+
       <Appbar />
 
       <div className="relative pt-32 pb-16 px-4 sm:px-6 lg:px-8">
@@ -242,8 +249,8 @@ export default function Dashboard() {
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-6">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-4xl md:text-5xl font-bold text-white">
-                  <span className="bg-gradient-to-r from-pink-400 to-purple-400 text-transparent bg-clip-text">
+                <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight">
+                  <span className="bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-400 text-transparent bg-clip-text drop-shadow-[0_0_25px_rgba(34,211,238,0.35)]">
                     The Decks
                   </span>
                 </h1>
@@ -252,13 +259,13 @@ export default function Dashboard() {
                   {[0.4, 0.9, 0.6, 1, 0.5].map((h, i) => (
                     <span
                       key={i}
-                      className="w-1 rounded-full bg-gradient-to-t from-cyan-400 to-pink-400 animate-eq"
+                      className="w-1 rounded-full bg-gradient-to-t from-cyan-400 to-fuchsia-400 animate-eq"
                       style={{ height: `${h * 100}%`, animationDelay: `${i * 0.12}s` }}
                     />
                   ))}
                 </div>
               </div>
-              <p className="text-purple-200 text-lg mt-1">
+              <p className="text-slate-300/80 text-lg mt-1">
                 Share both codes with your crew to let them join.
               </p>
             </div>
@@ -268,11 +275,11 @@ export default function Dashboard() {
               <button
                 onClick={() => sessionCode && copyCode(sessionCode, "code")}
                 disabled={!sessionCode}
-                className="group flex items-center justify-between gap-4 bg-black/40 border border-white/15 hover:border-pink-500/60 rounded-2xl px-5 py-3 transition-all disabled:opacity-50 min-w-[170px]"
+                className="group flex items-center justify-between gap-4 rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.06] px-5 py-3 transition-all hover:border-cyan-400/70 hover:bg-cyan-400/[0.1] disabled:opacity-50 min-w-[170px]"
                 title="Copy join code"
               >
                 <div className="text-left">
-                  <div className="text-[10px] uppercase tracking-widest text-purple-300">
+                  <div className="text-[10px] uppercase tracking-widest text-cyan-300/80">
                     Join Code
                   </div>
                   <div className="font-mono font-bold text-white text-2xl tracking-[0.2em]">
@@ -280,20 +287,20 @@ export default function Dashboard() {
                   </div>
                 </div>
                 {copied === "code" ? (
-                  <Check className="w-5 h-5 text-green-400 flex-shrink-0" />
+                  <Check className="w-5 h-5 text-cyan-300 flex-shrink-0" />
                 ) : (
-                  <Copy className="w-5 h-5 text-purple-300 group-hover:text-white flex-shrink-0" />
+                  <Copy className="w-5 h-5 text-cyan-300/70 group-hover:text-white flex-shrink-0" />
                 )}
               </button>
 
               <button
                 onClick={() => accessCode && copyCode(accessCode, "access")}
                 disabled={!accessCode}
-                className="group flex items-center justify-between gap-4 bg-black/40 border border-white/15 hover:border-cyan-500/60 rounded-2xl px-5 py-3 transition-all disabled:opacity-50 min-w-[170px]"
+                className="group flex items-center justify-between gap-4 rounded-2xl border border-fuchsia-400/25 bg-fuchsia-400/[0.06] px-5 py-3 transition-all hover:border-fuchsia-400/70 hover:bg-fuchsia-400/[0.1] disabled:opacity-50 min-w-[170px]"
                 title="Copy access code"
               >
                 <div className="text-left">
-                  <div className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-cyan-300">
+                  <div className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-fuchsia-300/80">
                     <KeyRound className="w-3 h-3" /> Access Code
                   </div>
                   <div className="font-mono font-bold text-white text-2xl tracking-[0.2em]">
@@ -301,16 +308,16 @@ export default function Dashboard() {
                   </div>
                 </div>
                 {copied === "access" ? (
-                  <Check className="w-5 h-5 text-green-400 flex-shrink-0" />
+                  <Check className="w-5 h-5 text-fuchsia-300 flex-shrink-0" />
                 ) : (
-                  <Copy className="w-5 h-5 text-purple-300 group-hover:text-white flex-shrink-0" />
+                  <Copy className="w-5 h-5 text-fuchsia-300/70 group-hover:text-white flex-shrink-0" />
                 )}
               </button>
 
               <button
                 onClick={endSession}
                 disabled={!sessionCode || ending}
-                className="group flex items-center justify-center gap-2 bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 hover:border-rose-400 text-rose-200 hover:text-white rounded-2xl px-5 py-3 transition-all disabled:opacity-50"
+                className="group flex items-center justify-center gap-2 rounded-2xl border border-rose-500/40 bg-rose-600/15 px-5 py-3 text-rose-200 transition-all hover:border-rose-400 hover:bg-rose-600/30 hover:text-white disabled:opacity-50"
                 title="End this session and delete everything in it"
               >
                 <Power className="w-5 h-5 flex-shrink-0" />
@@ -323,18 +330,26 @@ export default function Dashboard() {
 
           <div className="grid lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-6">
-              <div className="bg-black bg-opacity-40 backdrop-blur-xl rounded-3xl p-6 border border-white border-opacity-10 shadow-2xl">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6 shadow-[0_0_60px_-25px_rgba(34,211,238,0.5)] backdrop-blur-xl">
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-3">
                     <Disc3
-                      className={`w-6 h-6 text-pink-400 ${currentVideoId ? "animate-vinyl" : ""}`}
+                      className={`w-6 h-6 text-cyan-300 ${currentVideoId ? "animate-vinyl" : ""}`}
                     />
-                    <h2 className="text-2xl font-bold text-white">Now Spinning</h2>
+                    <h2 className="text-2xl font-bold text-white">
+                      Now Spinning
+                    </h2>
+                    {currentVideoId && (
+                      <span className="flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300">
+                        <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 animate-pulse" />
+                        Live
+                      </span>
+                    )}
                   </div>
                   {currentVideoId && (
                     <button
                       onClick={playNext}
-                      className="flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-2 rounded-full text-sm font-semibold transition-all"
+                      className="flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition-all hover:border-fuchsia-400/60 hover:bg-fuchsia-500/15"
                       title="Host: drop the current track and spin the next"
                     >
                       <SkipForward className="w-4 h-4" />
@@ -345,7 +360,7 @@ export default function Dashboard() {
 
                 {currentVideoId ? (
                   <div className="space-y-4">
-                    <div className="aspect-video rounded-xl overflow-hidden ring-2 ring-pink-500/30">
+                    <div className="aspect-video overflow-hidden rounded-2xl ring-1 ring-white/10 shadow-[0_0_40px_-12px_rgba(217,70,239,0.6)]">
                       <iframe
                         key={`${currentVideoId}-${playerKey}`}
                         width="100%"
@@ -363,28 +378,28 @@ export default function Dashboard() {
                           {currentSong.title}
                         </h3>
                         <div className="flex items-center gap-2 mt-2">
-                          <ThumbsUp className="w-4 h-4 text-pink-400" />
+                          <ThumbsUp className="w-4 h-4 text-cyan-300" />
                           <span className="text-white font-bold text-lg">
                             {currentSong.upvotes}
                           </span>
-                          <span className="text-xs text-purple-400">upvotes</span>
+                          <span className="text-xs text-slate-400">upvotes</span>
                         </div>
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="aspect-video rounded-xl bg-gradient-to-br from-purple-800 to-pink-800 flex items-center justify-center">
+                  <div className="aspect-video rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-900/40 to-fuchsia-900/40 flex items-center justify-center">
                     <div className="text-center">
-                      <Disc3 className="w-20 h-20 text-white mx-auto mb-4 opacity-50" />
-                      <p className="text-white text-xl">The deck is empty — drop a track</p>
+                      <Disc3 className="w-20 h-20 text-cyan-200/60 mx-auto mb-4" />
+                      <p className="text-slate-200 text-xl">The deck is empty — drop a track</p>
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="bg-black bg-opacity-40 backdrop-blur-xl rounded-xl p-4 sm:p-6 border border-white border-opacity-10 shadow-2xl">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-6 shadow-2xl backdrop-blur-xl">
                 <div className="flex items-center gap-3 mb-4">
-                  <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400 flex-shrink-0" />
+                  <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-300 flex-shrink-0" />
                   <h2 className="text-xl sm:text-2xl font-bold text-white">Drop a Track</h2>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-3">
@@ -393,13 +408,13 @@ export default function Dashboard() {
                     value={youtubeUrl}
                     onChange={(e) => setYoutubeUrl(e.target.value)}
                     placeholder="Paste YouTube URL here..."
-                    className="flex-1 bg-gray-900 bg-opacity-90 border-2 border-purple-500 border-opacity-40 text-white placeholder-purple-400 px-4 py-3 rounded-lg focus:outline-none focus:border-pink-500 transition-all duration-200 text-sm sm:text-base"
+                    className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white placeholder-slate-500 transition-all focus:border-cyan-400/60 focus:outline-none focus:ring-1 focus:ring-cyan-400/40 sm:text-base"
                     onKeyDown={(e) => e.key === "Enter" && addSong()}
                   />
                   <button
                     onClick={() => addSong()}
                     disabled={loading || !auth?.user}
-                    className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-6 sm:px-8 py-3 rounded-lg font-semibold shadow-lg transition-all duration-200 text-sm sm:text-base w-full sm:w-auto"
+                    className="rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-fuchsia-900/30 transition-all hover:from-cyan-400 hover:to-fuchsia-500 disabled:cursor-not-allowed disabled:from-slate-600 disabled:to-slate-700 sm:px-8 sm:text-base w-full sm:w-auto"
                   >
                     {loading ? "Adding..." : auth?.user ? "Add to Queue" : "Sign in to add"}
                   </button>
@@ -409,13 +424,13 @@ export default function Dashboard() {
                 <div className="mt-4 pt-4 border-t border-white/10">
                   <div className="flex flex-col sm:flex-row gap-3">
                     <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-400" />
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                       <input
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="…or search YouTube by name"
-                        className="w-full bg-gray-900 bg-opacity-90 border-2 border-cyan-500 border-opacity-30 text-white placeholder-purple-400 pl-9 pr-9 py-3 rounded-lg focus:outline-none focus:border-cyan-500 transition-all text-sm sm:text-base"
+                        className="w-full rounded-xl border border-white/10 bg-black/40 pl-9 pr-9 py-3 text-sm text-white placeholder-slate-500 transition-all focus:border-fuchsia-400/60 focus:outline-none focus:ring-1 focus:ring-fuchsia-400/40 sm:text-base"
                         onKeyDown={(e) => e.key === "Enter" && runSearch()}
                       />
                       {searchQuery && (
@@ -424,7 +439,7 @@ export default function Dashboard() {
                             setSearchQuery("");
                             setSearchResults([]);
                           }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-400 hover:text-white"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                           aria-label="Clear search"
                         >
                           <X className="w-4 h-4" />
@@ -434,7 +449,7 @@ export default function Dashboard() {
                     <button
                       onClick={runSearch}
                       disabled={searching || !searchQuery.trim()}
-                      className="bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-semibold transition-all text-sm sm:text-base w-full sm:w-auto"
+                      className="rounded-xl border border-fuchsia-400/40 bg-fuchsia-500/15 px-6 py-3 text-sm font-semibold text-fuchsia-100 transition-all hover:bg-fuchsia-500/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:text-base w-full sm:w-auto"
                     >
                       {searching ? "Searching…" : "Search"}
                     </button>
@@ -445,13 +460,13 @@ export default function Dashboard() {
                       {searchResults.map((r) => (
                         <div
                           key={r.videoId}
-                          className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg p-2 transition-all"
+                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-2 transition-all hover:border-cyan-400/40 hover:bg-white/[0.08]"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={r.thumbnail}
                             alt={r.title}
-                            className="w-16 h-10 rounded object-cover flex-shrink-0"
+                            className="w-16 h-10 rounded-lg object-cover flex-shrink-0"
                           />
                           <span className="flex-1 min-w-0 text-white text-sm line-clamp-2">
                             {r.title}
@@ -459,7 +474,7 @@ export default function Dashboard() {
                           <button
                             onClick={() => addFromSearch(r.videoId)}
                             disabled={loading}
-                            className="flex-shrink-0 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-md text-sm font-semibold"
+                            className="flex-shrink-0 rounded-lg bg-gradient-to-r from-cyan-500 to-fuchsia-600 px-3 py-1.5 text-sm font-semibold text-white transition-all hover:from-cyan-400 hover:to-fuchsia-500 disabled:opacity-50"
                           >
                             Add
                           </button>
@@ -472,81 +487,83 @@ export default function Dashboard() {
             </div>
 
             <div className="lg:col-span-1">
-              <div className="bg-black bg-opacity-40 backdrop-blur-xl rounded-3xl p-4 sm:p-6 border border-white border-opacity-10 shadow-2xl sticky top-24">
+              <div className="sticky top-24 rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-6 shadow-2xl backdrop-blur-xl">
                 <div className="flex items-center gap-3 mb-4">
-                  <Music2 className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400 flex-shrink-0" />
+                  <Music2 className="w-5 h-5 sm:w-6 sm:h-6 text-fuchsia-300 flex-shrink-0" />
                   <h2 className="text-xl sm:text-2xl font-bold text-white">
-                    Up Next ({upNext.length})
+                    Up Next{" "}
+                    <span className="text-fuchsia-300/80">({upNext.length})</span>
                   </h2>
                 </div>
 
                 <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                   {upNext.length === 0 ? (
-                    <p className="text-purple-300 text-center py-8">
+                    <p className="text-slate-400 text-center py-8">
                       Queue is empty — add the next banger
                     </p>
                   ) : (
                     upNext.map((song, idx) => (
                       <div
                         key={song.id}
-                        className="bg-white bg-opacity-10 backdrop-blur-lg rounded-xl p-3 border transition-all duration-200 border-white border-opacity-20 hover:bg-opacity-20"
+                        className="rounded-xl border border-white/10 bg-white/[0.04] p-3 transition-all hover:border-cyan-400/40 hover:bg-white/[0.07]"
                       >
-                        <div className="flex gap-3">
+                        {/* Title gets its own full-width line so it's always readable */}
+                        <div className="flex items-start gap-3">
                           <div className="relative flex-shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={song.smallImg}
                               alt={song.title}
-                              className="w-20 h-14 rounded-lg object-cover"
+                              className="w-16 h-12 rounded-lg object-cover ring-1 ring-white/10"
                             />
-                            <span className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-gradient-to-r from-pink-500 to-purple-600 text-white text-xs font-bold flex items-center justify-center shadow-lg">
+                            <span className="absolute -top-2 -left-2 flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-600 text-xs font-bold text-white shadow-lg">
                               {idx + 1}
                             </span>
                           </div>
-                          <div className="flex-1 min-w-0 overflow-hidden">
-                            <h3 className="text-white font-semibold text-sm break-words line-clamp-2">
-                              {song.title}
-                            </h3>
-                            <div className="flex items-center gap-2 mt-2 flex-wrap">
-                              <button
-                                onClick={() => upvote(song.id)}
-                                className={`p-1 rounded transition-all flex-shrink-0 ${
-                                  song.myVote === 1
-                                    ? "bg-green-500 text-white"
-                                    : "bg-green-500 bg-opacity-20 hover:bg-opacity-40 text-green-400"
-                                }`}
-                                aria-label="Upvote"
-                                aria-pressed={song.myVote === 1}
-                              >
-                                <ThumbsUp className="w-4 h-4" />
-                              </button>
-                              <div className="flex items-center gap-1 bg-white bg-opacity-20 px-2 py-1 rounded-md">
-                                <span className="text-sm font-bold text-white">
-                                  {song.upvotes}
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => downvote(song.id)}
-                                className={`p-1 rounded transition-all flex-shrink-0 ${
-                                  song.myVote === -1
-                                    ? "bg-red-500 text-white"
-                                    : "bg-red-500 bg-opacity-20 hover:bg-opacity-40 text-red-400"
-                                }`}
-                                aria-label="Downvote"
-                                aria-pressed={song.myVote === -1}
-                              >
-                                <ThumbsDown className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => removeStream(song.id)}
-                                className="ml-auto bg-white/10 hover:bg-white/20 text-purple-200 p-1 rounded transition-all flex-shrink-0"
-                                aria-label="Remove from queue"
-                                title="Host: remove from queue"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                          <h3 className="flex-1 min-w-0 text-[0.95rem] font-semibold leading-snug text-white break-words line-clamp-3">
+                            {song.title}
+                          </h3>
+                        </div>
+
+                        {/* Vote controls on their own row, clear of the title */}
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            onClick={() => upvote(song.id)}
+                            className={`flex items-center justify-center rounded-lg p-1.5 transition-all ${
+                              song.myVote === 1
+                                ? "bg-cyan-400 text-black"
+                                : "bg-cyan-400/15 text-cyan-300 hover:bg-cyan-400/30"
+                            }`}
+                            aria-label="Upvote"
+                            aria-pressed={song.myVote === 1}
+                          >
+                            <ThumbsUp className="w-4 h-4" />
+                          </button>
+                          <div className="min-w-[2.5rem] rounded-lg bg-black/30 px-2 py-1 text-center">
+                            <span className="text-sm font-bold text-white">
+                              {song.upvotes}
+                            </span>
                           </div>
+                          <button
+                            onClick={() => downvote(song.id)}
+                            className={`flex items-center justify-center rounded-lg p-1.5 transition-all ${
+                              song.myVote === -1
+                                ? "bg-rose-500 text-white"
+                                : "bg-rose-500/15 text-rose-300 hover:bg-rose-500/30"
+                            }`}
+                            aria-label="Downvote"
+                            aria-pressed={song.myVote === -1}
+                          >
+                            <ThumbsDown className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => removeStream(song.id)}
+                            className="ml-auto rounded-lg bg-white/5 p-1.5 text-slate-400 transition-all hover:bg-white/15 hover:text-white"
+                            aria-label="Remove from queue"
+                            title="Host: remove from queue"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
                     ))
