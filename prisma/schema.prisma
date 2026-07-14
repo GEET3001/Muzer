@@ -71,6 +71,9 @@ model Session {
   host      User            @relation("SessionHost", fields: [hostId], references: [id])
   members   SessionMember[]
   streams   Stream[]
+  // The track currently playing. Pinned so votes reorder only the upcoming
+  // queue and never swap the song that's already on the deck. Null = deck idle.
+  currentStreamId String?
   createdAt DateTime        @default(now())
 }
 

@@ -5,18 +5,9 @@ import useSWR from "swr";
 import { useEffect, useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { Appbar } from "@/app/components/Appbar";
+import { YouTubePlayer } from "@/app/components/YouTubePlayer";
+import { applyVote, type QueueResponse } from "@/app/lib/queue";
 import { ThumbsUp, ThumbsDown, Plus, Disc3, Music2, KeyRound, LogIn, Search, X } from "lucide-react";
-
-type QueueItem = {
-  id: string;
-  url: string;
-  title: string;
-  smallImg: string;
-  bigImg: string;
-  extractedId: string;
-  upvotes: number;
-  myVote: number;
-};
 
 type SearchResult = { videoId: string; title: string; thumbnail: string };
 
@@ -48,13 +39,19 @@ export default function SessionPage() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  const { data, error, mutate } = useSWR<{ items: QueueItem[] }>(
+  const { data, error, mutate } = useSWR<QueueResponse>(
     code && auth?.user ? `/api/streams?code=${code}` : null,
     fetcher,
     // Real-time push (below) drives updates; slow poll is just a safety net.
     { refreshInterval: 15000, shouldRetryOnError: false }
   );
   const items = data?.items ?? [];
+  // The pinned now-playing track (guests watch it too); the queue is everyone
+  // else, already vote-ordered by the server.
+  const currentStreamId = data?.currentStreamId ?? null;
+  const currentSong = items.find((s) => s.id === currentStreamId) ?? items[0];
+  const currentVideoId = currentSong?.extractedId ?? null;
+  const queue = items.filter((s) => s.id !== currentSong?.id);
 
   // 403 from the queue endpoint means "not a member yet" — show the gate.
   const needsAccess =
@@ -98,23 +95,31 @@ export default function SessionPage() {
     }
   };
 
-  const upvote = async (id: string) => {
-    await fetch("/api/streams/upvote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ streamId: id }),
-    });
-    mutate();
+  // Vote with instant optimistic feedback, then revalidate against the server.
+  const vote = async (id: string, dir: 1 | -1) => {
+    const endpoint = dir === 1 ? "upvote" : "downvote";
+    await mutate(
+      async () => {
+        await fetch(`/api/streams/${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ streamId: id }),
+        });
+        return fetcher(`/api/streams?code=${code}`);
+      },
+      {
+        optimisticData: (cur?: QueueResponse) =>
+          cur
+            ? { ...cur, items: applyVote(cur.items, id, dir) }
+            : (cur as unknown as QueueResponse),
+        rollbackOnError: true,
+        revalidate: false,
+      }
+    );
   };
 
-  const downvote = async (id: string) => {
-    await fetch("/api/streams/downvote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ streamId: id }),
-    });
-    mutate();
-  };
+  const upvote = (id: string) => vote(id, 1);
+  const downvote = (id: string) => vote(id, -1);
 
   const addSong = async (urlArg?: string) => {
     const url = (urlArg ?? youtubeUrl).trim();
@@ -229,9 +234,40 @@ export default function SessionPage() {
           </div>
         )}
 
-        {/* Joined: queue + add */}
+        {/* Joined: now playing + queue + add */}
         {auth?.user && !needsAccess && !sessionGone && (
           <>
+            {/* Now Playing — guests watch the same pinned track as the host. */}
+            <div className="bg-black/40 border border-white/10 rounded-2xl p-4 mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Disc3
+                  className={`w-5 h-5 text-pink-400 ${currentVideoId ? "animate-vinyl" : ""}`}
+                />
+                <span className="text-white font-semibold">Now Playing</span>
+                {currentVideoId && (
+                  <span className="ml-1 flex items-center gap-1.5 rounded-full border border-pink-400/30 bg-pink-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pink-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-pink-300 animate-pulse" />
+                    Live
+                  </span>
+                )}
+              </div>
+              {currentVideoId ? (
+                <div className="space-y-3">
+                  <YouTubePlayer
+                    videoId={currentVideoId}
+                    className="aspect-video overflow-hidden rounded-xl ring-1 ring-white/10"
+                  />
+                  <h3 className="text-white font-semibold break-words line-clamp-2">
+                    {currentSong.title}
+                  </h3>
+                </div>
+              ) : (
+                <div className="aspect-video rounded-xl border border-white/10 bg-gradient-to-br from-purple-900/40 to-pink-900/40 flex items-center justify-center">
+                  <p className="text-purple-200">Waiting for the host to spin a track…</p>
+                </div>
+              )}
+            </div>
+
             <div className="bg-black/40 border border-white/10 rounded-2xl p-4 mb-6">
               <div className="flex items-center gap-2 mb-3">
                 <Plus className="w-5 h-5 text-cyan-400" />
@@ -318,13 +354,23 @@ export default function SessionPage() {
               </div>
             </div>
 
+            <div className="flex items-center gap-2 mb-3">
+              <Music2 className="w-5 h-5 text-purple-300" />
+              <span className="text-white font-semibold">
+                Up Next <span className="text-purple-300/80">({queue.length})</span>
+              </span>
+            </div>
             <div className="space-y-3">
               {items.length === 0 ? (
                 <div className="text-purple-200 flex items-center gap-2">
                   <Music2 className="w-5 h-5" /> No tracks yet — be the first to drop one
                 </div>
+              ) : queue.length === 0 ? (
+                <div className="text-purple-200/80 text-sm">
+                  Nothing queued — add the next track above.
+                </div>
               ) : (
-                items.map((s, idx) => (
+                queue.map((s, idx) => (
                   <div
                     key={s.id}
                     className="bg-white/10 border border-white/10 rounded-xl p-3 flex gap-3"

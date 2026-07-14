@@ -13,24 +13,14 @@ import {
   Check,
   Copy,
   KeyRound,
-  Trash2,
   SkipForward,
   Power,
   Search,
   X,
 } from "lucide-react";
 import { Appbar } from "../components/Appbar";
-
-type QueueItem = {
-  id: string;
-  url: string;
-  title: string;
-  smallImg: string;
-  bigImg: string;
-  extractedId: string;
-  upvotes: number;
-  myVote: number;
-};
+import { YouTubePlayer } from "../components/YouTubePlayer";
+import { applyVote, type QueueItem, type QueueResponse } from "../lib/queue";
 
 type SearchResult = { videoId: string; title: string; thumbnail: string };
 
@@ -46,7 +36,6 @@ export default function Dashboard() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [copied, setCopied] = useState<"code" | "access" | null>(null);
   const [loading, setLoading] = useState(false);
-  const [playerKey, setPlayerKey] = useState(0);
   const [sessionCode, setSessionCode] = useState<string | null>(null);
   const [accessCode, setAccessCode] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
@@ -108,14 +97,14 @@ export default function Dashboard() {
     }
   };
 
-  const { data, mutate } = useSWR<{ items: QueueItem[] }>(
+  const { data, mutate } = useSWR<QueueResponse>(
     sessionCode ? `/api/streams?code=${sessionCode}` : null,
     fetcher,
     // Real-time push (below) drives updates; this is just a slow safety-net poll.
     { refreshInterval: 15000 }
   );
 
-  const sortedQueue = useMemo<QueueItem[]>(() => data?.items ?? [], [data]);
+  const items = useMemo<QueueItem[]>(() => data?.items ?? [], [data]);
 
   // Live updates: refetch the queue the moment the server pushes a change
   // (add / vote / remove / end), instead of hammering the poll every 2s.
@@ -144,7 +133,7 @@ export default function Dashboard() {
       // Clear the now-stale queue and credentials, then start a fresh room.
       setSessionCode(null);
       setAccessCode(null);
-      await mutate({ items: [] }, { revalidate: false });
+      await mutate({ currentStreamId: null, items: [] }, { revalidate: false });
       await loadOrCreateRoom();
     } finally {
       setEnding(false);
@@ -195,43 +184,50 @@ export default function Dashboard() {
     setSearchQuery("");
   };
 
-  const upvote = async (id: string) => {
-    await fetch("/api/streams/upvote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ streamId: id }),
-    });
-    mutate();
+  // Vote with instant optimistic feedback: update + re-sort the local queue
+  // immediately (pinning the current track), fire the request, then revalidate.
+  const vote = async (id: string, dir: 1 | -1) => {
+    const endpoint = dir === 1 ? "upvote" : "downvote";
+    await mutate(
+      async () => {
+        await fetch(`/api/streams/${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ streamId: id }),
+        });
+        // Resolve with the server's authoritative state.
+        return fetcher(`/api/streams?code=${sessionCode}`);
+      },
+      {
+        optimisticData: (cur?: QueueResponse) =>
+          cur
+            ? { ...cur, items: applyVote(cur.items, id, dir) }
+            : (cur as unknown as QueueResponse),
+        rollbackOnError: true,
+        revalidate: false,
+      }
+    );
   };
 
-  const downvote = async (id: string) => {
-    await fetch("/api/streams/downvote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ streamId: id }),
-    });
-    mutate();
-  };
+  const upvote = (id: string) => vote(id, 1);
+  const downvote = (id: string) => vote(id, -1);
 
-  const removeStream = async (id: string) => {
-    await fetch("/api/streams", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ streamId: id }),
-    });
-    mutate();
-  };
-
+  // Advance the deck: the server drops the finished track and pins the next
+  // top-voted one. Runs on video-end (auto) and via the host's Skip button.
   const playNext = async () => {
-    if (!currentSong) return;
-    await removeStream(currentSong.id);
-    // Force the iframe to remount so the next track starts cleanly.
-    setPlayerKey((k) => k + 1);
+    if (!sessionCode) return;
+    await fetch("/api/streams/next", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: sessionCode }),
+    });
+    mutate();
   };
 
-  const currentSong = sortedQueue[0];
+  const currentStreamId = data?.currentStreamId ?? null;
+  const currentSong = items.find((s) => s.id === currentStreamId) ?? items[0];
   const currentVideoId = currentSong?.extractedId ?? null;
-  const upNext = sortedQueue.slice(1);
+  const upNext = items.filter((s) => s.id !== currentSong?.id);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#060109] text-white">
@@ -360,18 +356,11 @@ export default function Dashboard() {
 
                 {currentVideoId ? (
                   <div className="space-y-4">
-                    <div className="aspect-video overflow-hidden rounded-2xl ring-1 ring-white/10 shadow-[0_0_40px_-12px_rgba(217,70,239,0.6)]">
-                      <iframe
-                        key={`${currentVideoId}-${playerKey}`}
-                        width="100%"
-                        height="100%"
-                        src={`https://www.youtube.com/embed/${currentVideoId}?autoplay=1&enablejsapi=1`}
-                        title="YouTube video player"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                        className="w-full h-full"
-                      ></iframe>
-                    </div>
+                    <YouTubePlayer
+                      videoId={currentVideoId}
+                      onEnded={playNext}
+                      className="aspect-video overflow-hidden rounded-2xl ring-1 ring-white/10 shadow-[0_0_40px_-12px_rgba(217,70,239,0.6)]"
+                    />
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                       <div className="flex-1 min-w-0 pr-4">
                         <h3 className="text-lg sm:text-xl font-semibold text-white break-words line-clamp-2">
@@ -555,14 +544,6 @@ export default function Dashboard() {
                             aria-pressed={song.myVote === -1}
                           >
                             <ThumbsDown className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => removeStream(song.id)}
-                            className="ml-auto rounded-lg bg-white/5 p-1.5 text-slate-400 transition-all hover:bg-white/15 hover:text-white"
-                            aria-label="Remove from queue"
-                            title="Host: remove from queue"
-                          >
-                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>

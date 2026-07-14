@@ -5,7 +5,7 @@ import { authOptions } from "@/app/lib/auth";
 import { getServerSession } from "next-auth";
 import { isParticipant } from "@/app/lib/access";
 import { cacheGet, cacheSet, rateLimit, publishQueueChanged } from "@/app/lib/redis";
-import youtubesearchapi from "youtube-search-api";
+import { fetchVideoMeta, type VideoMeta } from "@/app/lib/youtube";
 
 const YT_REGEX =
   /^(?:(?:https?:)?\/\/)?(?:www\.)?(?:m\.)?(?:youtu(?:be)?\.com\/(?:v\/|embed\/|watch(?:\/|\?v=))|youtu\.be\/)((?:\w|-){11})(?:\S+)?$/;
@@ -15,44 +15,21 @@ const CreateStreamSchema = z.object({
   sessionCode: z.string().min(1, "sessionCode is required"),
 });
 
-type VideoMeta = { title: string; smallImg: string; bigImg: string };
-
-// Look up (and cache) YouTube metadata for a video id. Always resolves — falls
-// back to the CDN thumbnail + a placeholder title if the lookup fails.
+// Look up (and cache) YouTube metadata for a video id. Always resolves — the
+// underlying fetch falls back to the CDN thumbnail + a placeholder title if the
+// lookup fails (see fetchVideoMeta).
 async function getVideoMeta(extractedId: string): Promise<VideoMeta> {
-  const fallbackThumb = `https://img.youtube.com/vi/${extractedId}/hqdefault.jpg`;
-  const fallback: VideoMeta = {
-    title: "Untitled track",
-    smallImg: fallbackThumb,
-    bigImg: fallbackThumb,
-  };
-
   const cached = await cacheGet<VideoMeta>(`yt:${extractedId}`);
   if (cached) return cached;
 
-  try {
-    const res = await youtubesearchapi.GetVideoDetails(extractedId);
-    const meta: VideoMeta = { ...fallback };
-    if (res?.title) meta.title = res.title;
+  const meta = await fetchVideoMeta(extractedId);
 
-    const thumbnails: { url: string; width: number }[] =
-      res?.thumbnail?.thumbnails ?? [];
-    if (thumbnails.length > 0) {
-      thumbnails.sort((a, b) => a.width - b.width);
-      meta.bigImg = thumbnails[thumbnails.length - 1].url ?? fallbackThumb;
-      meta.smallImg =
-        thumbnails.length > 1
-          ? thumbnails[thumbnails.length - 2].url ?? fallbackThumb
-          : meta.bigImg;
-    }
-
+  // Don't cache a failed lookup (placeholder title) — retry it next time.
+  if (meta.title !== "Untitled track") {
     // Cache for an hour — titles/thumbnails for a given id are effectively static.
     await cacheSet(`yt:${extractedId}`, meta, 3600);
-    return meta;
-  } catch {
-    // Metadata lookup failed — keep the CDN fallbacks and still queue the song.
-    return fallback;
   }
+  return meta;
 }
 
 export async function POST(req: NextRequest) {
@@ -197,11 +174,36 @@ export async function GET(req: NextRequest) {
       upvotes: s.upvotes.reduce((sum, v) => sum + v.value, 0),
       // This caller's own vote, so the UI can highlight up/down: 1 | -1 | 0.
       myVote: s.upvotes.find((v) => v.userId === user.id)?.value ?? 0,
+      // ISO timestamp — the client uses it as the vote tie-breaker and to keep
+      // its optimistic re-sort identical to the server's ordering.
+      createdAt: s.createdAt.toISOString(),
     }))
-    // Highest score first; ties keep insertion order (stable sort).
-    .sort((a, b) => b.upvotes - a.upvotes);
+    // Highest score first; ties broken by whoever was added earlier (ISO strings
+    // compare chronologically). Explicit so it never depends on sort stability.
+    .sort(
+      (a, b) =>
+        b.upvotes - a.upvotes ||
+        (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
+    );
 
-  return NextResponse.json({ items });
+  // Resolve the pinned "now playing" track. If the session has no current track
+  // (fresh room, or the last one was played out) or it points at a track that no
+  // longer exists, lock in the current top of the queue and persist it so votes
+  // can't swap the playing song out from under everyone.
+  let currentStreamId = foundSession.currentStreamId;
+  const currentValid =
+    currentStreamId && items.some((i) => i.id === currentStreamId);
+  if (!currentValid) {
+    currentStreamId = items[0]?.id ?? null;
+    if (currentStreamId !== foundSession.currentStreamId) {
+      await prismaClient.session.update({
+        where: { id: foundSession.id },
+        data: { currentStreamId },
+      });
+    }
+  }
+
+  return NextResponse.json({ currentStreamId, items });
 }
 
 const DeleteStreamSchema = z.object({
