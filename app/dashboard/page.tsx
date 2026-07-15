@@ -17,6 +17,10 @@ import {
   Power,
   Search,
   X,
+  Banknote,
+  RefreshCw,
+  ExternalLink,
+  CheckCircle2,
 } from "lucide-react";
 import { Appbar } from "../components/Appbar";
 import { YouTubePlayer } from "../components/YouTubePlayer";
@@ -42,6 +46,12 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [payStatus, setPayStatus] = useState<{
+    linked: boolean;
+    payoutsEnabled: boolean;
+  } | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [refreshingPay, setRefreshingPay] = useState(false);
 
   // Redirect if unauthenticated
   useEffect(() => {
@@ -182,6 +192,54 @@ export default function Dashboard() {
     await addSong(`https://www.youtube.com/watch?v=${videoId}`);
     setSearchResults([]);
     setSearchQuery("");
+  };
+
+  // Razorpay Route payout status for this host. Gated on sessionCode because the
+  // status endpoint only answers once the user actually hosts a room.
+  const loadPaymentStatus = useCallback(async () => {
+    const res = await fetch("/api/host/payment/status");
+    if (!res.ok) return;
+    const json = await res.json().catch(() => null);
+    if (json) {
+      setPayStatus({
+        linked: !!json.linked,
+        payoutsEnabled: !!json.payoutsEnabled,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sessionCode) return;
+    loadPaymentStatus();
+  }, [sessionCode, loadPaymentStatus]);
+
+  // Create (or fetch) the host's linked account, then open Razorpay's hosted
+  // onboarding in a new tab so they can finish KYC.
+  const linkRazorpay = async () => {
+    setLinking(true);
+    try {
+      const res = await fetch("/api/host/payment/razorpay", { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        if (json.onboardingUrl) {
+          window.open(json.onboardingUrl, "_blank", "noopener,noreferrer");
+        }
+        await loadPaymentStatus();
+      } else {
+        alert(json.message ?? "Could not link Razorpay account");
+      }
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const refreshPaymentStatus = async () => {
+    setRefreshingPay(true);
+    try {
+      await loadPaymentStatus();
+    } finally {
+      setRefreshingPay(false);
+    }
   };
 
   // Vote with instant optimistic feedback: update + re-sort the local queue
@@ -472,6 +530,66 @@ export default function Dashboard() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Payments — host links a Razorpay Route account so guests can
+                  bid to boost tracks and payouts land in the host's account. */}
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-6 shadow-2xl backdrop-blur-xl">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-3">
+                    <Banknote className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-300 flex-shrink-0" />
+                    <h2 className="text-xl sm:text-2xl font-bold text-white">
+                      Payments
+                    </h2>
+                    {payStatus?.payoutsEnabled ? (
+                      <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+                        <CheckCircle2 className="w-3 h-3" /> Payouts live
+                      </span>
+                    ) : payStatus?.linked ? (
+                      <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                        KYC pending
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-white/15 bg-white/5 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                        Not linked
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={refreshPaymentStatus}
+                    disabled={refreshingPay || !sessionCode}
+                    className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:border-cyan-400/50 hover:text-white disabled:opacity-50"
+                    title="Refresh payout status"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${refreshingPay ? "animate-spin" : ""}`}
+                    />
+                    Refresh status
+                  </button>
+                </div>
+
+                <p className="text-sm text-slate-300/80 mb-4">
+                  {payStatus?.payoutsEnabled
+                    ? "Your Razorpay account is active. Guests can bid to boost tracks and your share is paid out automatically."
+                    : payStatus?.linked
+                    ? "Account linked. Finish KYC on Razorpay to start receiving payouts, then hit Refresh status."
+                    : "Link a Razorpay account to let your crew pay to bump tracks up the queue."}
+                </p>
+
+                {!payStatus?.payoutsEnabled && (
+                  <button
+                    onClick={linkRazorpay}
+                    disabled={linking || !sessionCode}
+                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-900/30 transition-all hover:from-emerald-400 hover:to-cyan-500 disabled:cursor-not-allowed disabled:from-slate-600 disabled:to-slate-700"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    {linking
+                      ? "Opening Razorpay…"
+                      : payStatus?.linked
+                      ? "Continue onboarding"
+                      : "Link Razorpay account"}
+                  </button>
+                )}
               </div>
             </div>
 
