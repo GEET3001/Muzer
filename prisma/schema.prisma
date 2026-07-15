@@ -98,14 +98,19 @@ model SessionMember {
 
 model Payment {
   id                 String   @id @default(uuid())
-  streamId           String
+  // Nullable + SetNull: a paid track is eventually played and deleted on deck
+  // advance. We must never lose the Payment (it's a financial record), so the
+  // stream link is severed rather than the row deleted. The webhook credits the
+  // bid before this ever happens, so a null streamId at webhook time just means
+  // "track already gone — capture the money, skip the queue bump".
+  streamId           String?
   payerId            String
   amountUnits        Int      // paise
   platformFeeUnits   Int      // paise
   providerRef        String   @unique   // Razorpay order_id
   idempotencyKey     String   @unique
   status             PaymentStatus @default(pending)
-  stream             Stream   @relation(fields: [streamId], references: [id])
+  stream             Stream?  @relation(fields: [streamId], references: [id], onDelete: SetNull)
   payer              User     @relation("PaymentPayer", fields: [payerId], references: [id])
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
