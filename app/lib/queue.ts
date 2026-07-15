@@ -20,6 +20,10 @@ export type QueueItem = {
 export type QueueResponse = {
   currentStreamId: string | null;
   items: QueueItem[];
+  // Whether the session host can currently receive bid payouts. The bid UI is
+  // only actionable when this is true (host linked a Razorpay account AND
+  // payouts are live). Derived server-side in GET /api/streams.
+  host: { acceptsPayments: boolean };
 };
 
 // Re-sort exactly like the server: highest paid bid first, then highest net

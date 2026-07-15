@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Appbar } from "../components/Appbar";
 import { YouTubePlayer } from "../components/YouTubePlayer";
+import { BidModal } from "../components/BidModal";
 import { applyVote, type QueueItem, type QueueResponse } from "../lib/queue";
 
 type SearchResult = { videoId: string; title: string; thumbnail: string };
@@ -52,6 +53,14 @@ export default function Dashboard() {
   } | null>(null);
   const [linking, setLinking] = useState(false);
   const [refreshingPay, setRefreshingPay] = useState(false);
+  // Bid flow: which track's BidModal is open, and a transient confirmation toast.
+  const [bidFor, setBidFor] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // Redirect if unauthenticated
   useEffect(() => {
@@ -143,7 +152,10 @@ export default function Dashboard() {
       // Clear the now-stale queue and credentials, then start a fresh room.
       setSessionCode(null);
       setAccessCode(null);
-      await mutate({ currentStreamId: null, items: [] }, { revalidate: false });
+      await mutate(
+        { currentStreamId: null, items: [], host: { acceptsPayments: false } },
+        { revalidate: false }
+      );
       await loadOrCreateRoom();
     } finally {
       setEnding(false);
@@ -286,6 +298,8 @@ export default function Dashboard() {
   const currentSong = items.find((s) => s.id === currentStreamId) ?? items[0];
   const currentVideoId = currentSong?.extractedId ?? null;
   const upNext = items.filter((s) => s.id !== currentSong?.id);
+  // Bidding is only actionable when the host's payouts are live.
+  const hostAcceptsPayments = data?.host?.acceptsPayments ?? false;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#060109] text-white">
@@ -630,6 +644,11 @@ export default function Dashboard() {
                           <h3 className="flex-1 min-w-0 text-[0.95rem] font-semibold leading-snug text-white break-words line-clamp-3">
                             {song.title}
                           </h3>
+                          {song.bidAmountUnits > 0 && (
+                            <span className="flex-shrink-0 flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-400/15 px-2 py-0.5 text-xs font-bold text-emerald-300">
+                              <Banknote className="w-3 h-3" />₹{song.bidAmountUnits / 100}
+                            </span>
+                          )}
                         </div>
 
                         {/* Vote controls on their own row, clear of the title */}
@@ -663,6 +682,13 @@ export default function Dashboard() {
                           >
                             <ThumbsDown className="w-4 h-4" />
                           </button>
+                          <button
+                            onClick={() => setBidFor(song.id)}
+                            className="ml-auto flex items-center gap-1 rounded-lg border border-emerald-400/40 bg-emerald-400/15 px-2.5 py-1.5 text-xs font-semibold text-emerald-200 transition-all hover:bg-emerald-400/30"
+                            aria-label="Bid to boost this track"
+                          >
+                            <Banknote className="w-3.5 h-3.5" /> Bid
+                          </button>
                         </div>
                       </div>
                     ))
@@ -673,6 +699,27 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Bid modal */}
+      {bidFor && sessionCode && (
+        <BidModal
+          streamId={bidFor}
+          sessionCode={sessionCode}
+          hostAcceptsPayments={hostAcceptsPayments}
+          onClose={() => setBidFor(null)}
+          onSuccess={() => {
+            setBidFor(null);
+            setToast("Bid placed — the track moves up once the payment clears.");
+          }}
+        />
+      )}
+
+      {/* Transient confirmation toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-emerald-400/40 bg-black/80 px-4 py-3 text-sm font-medium text-emerald-200 shadow-lg backdrop-blur">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

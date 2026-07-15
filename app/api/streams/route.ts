@@ -146,10 +146,22 @@ export async function GET(req: NextRequest) {
 
   const foundSession = await prismaClient.session.findUnique({
     where: { code },
+    include: {
+      host: {
+        select: { razorpayAccountId: true, razorpayPayoutsEnabled: true },
+      },
+    },
   });
   if (!foundSession) {
     return NextResponse.json({ message: "Invalid session" }, { status: 404 });
   }
+
+  // Guests can only bid when the host's payouts are actually live — surfaced to
+  // the client so the Bid button knows whether to offer a payment or a notice.
+  const acceptsPayments = Boolean(
+    foundSession.host.razorpayAccountId &&
+      foundSession.host.razorpayPayoutsEnabled
+  );
 
   // Gate the queue behind two-code membership.
   if (!(await isParticipant(user.id, foundSession))) {
@@ -207,7 +219,11 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ currentStreamId, items });
+  return NextResponse.json({
+    currentStreamId,
+    items,
+    host: { acceptsPayments },
+  });
 }
 
 const DeleteStreamSchema = z.object({
