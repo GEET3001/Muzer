@@ -17,6 +17,11 @@ model User {
   addedStreams   Stream[]        @relation("StreamAddedBy")
   sessionsHosted Session[]       @relation("SessionHost")
   sessionMembers SessionMember[]
+  // Razorpay Route linked account for receiving bid payouts (hosts only). Null
+  // until the host onboards; payoutsEnabled flips once KYC/payouts are live.
+  razorpayAccountId       String?
+  razorpayPayoutsEnabled  Boolean @default(false)
+  payments Payment[] @relation("PaymentPayer")
 }
 
 model Stream {
@@ -36,6 +41,11 @@ model Stream {
   addedById     String?
   addedBy       User?      @relation("StreamAddedBy", fields: [addedById], references: [id])
   createdAt     DateTime   @default(now())
+  // Cumulative paid bid in paise (₹0.01). Only ever incremented by the Razorpay
+  // webhook after a captured payment. Queue orders by this first, before votes.
+  bidAmountUnits Int       @default(0)
+  payments      Payment[]
+  @@index([sessionId, bidAmountUnits])
 }
 
 model Upvotes {
@@ -84,4 +94,27 @@ model SessionMember {
   session   Session  @relation(fields: [sessionId], references: [id])
   user      User     @relation(fields: [userId], references: [id])
   @@unique([sessionId, userId], name: "sessionId_userId")
+}
+
+model Payment {
+  id                 String   @id @default(uuid())
+  streamId           String
+  payerId            String
+  amountUnits        Int      // paise
+  platformFeeUnits   Int      // paise
+  providerRef        String   @unique   // Razorpay order_id
+  idempotencyKey     String   @unique
+  status             PaymentStatus @default(pending)
+  stream             Stream   @relation(fields: [streamId], references: [id])
+  payer              User     @relation("PaymentPayer", fields: [payerId], references: [id])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  @@index([streamId])
+  @@index([payerId])
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
 }

@@ -55,7 +55,9 @@ export async function POST(req: NextRequest) {
       ]);
     }
 
-    // Pick the next track: highest net votes, ties broken by earliest added.
+    // Pick the next track: highest paid bid first, then highest net votes, ties
+    // broken by earliest added. Comparator is explicit (does NOT rely on JS sort
+    // stability) and mirrors sortQueue() in app/lib/queue.ts exactly.
     const remaining = await prismaClient.stream.findMany({
       where: { sessionId: foundSession.id },
       include: { upvotes: true },
@@ -64,9 +66,16 @@ export async function POST(req: NextRequest) {
     const ranked = remaining
       .map((s) => ({
         id: s.id,
+        bidAmountUnits: s.bidAmountUnits,
         score: s.upvotes.reduce((sum, v) => sum + v.value, 0),
+        createdAt: s.createdAt.toISOString(),
       }))
-      .sort((a, b) => b.score - a.score); // stable: ties keep createdAt-asc order
+      .sort(
+        (a, b) =>
+          b.bidAmountUnits - a.bidAmountUnits ||
+          b.score - a.score ||
+          (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
+      );
     const nextId = ranked[0]?.id ?? null;
 
     await prismaClient.session.update({

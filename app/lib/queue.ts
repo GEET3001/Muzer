@@ -11,6 +11,9 @@ export type QueueItem = {
   extractedId: string;
   upvotes: number;
   myVote: number;
+  // Cumulative paid bid in paise. Tracks with any bid outrank zero-bid tracks
+  // regardless of votes.
+  bidAmountUnits: number;
   createdAt: string;
 };
 
@@ -19,11 +22,14 @@ export type QueueResponse = {
   items: QueueItem[];
 };
 
-// Re-sort exactly like the server: highest net votes first, ties broken by
-// whoever was added earliest (ISO timestamps compare chronologically).
+// Re-sort exactly like the server: highest paid bid first, then highest net
+// votes, ties broken by whoever was added earliest (ISO timestamps compare
+// chronologically). This comparator is mirrored byte-for-byte in
+// app/api/streams/route.ts (GET) and app/api/streams/next/route.ts.
 export function sortQueue(items: QueueItem[]): QueueItem[] {
   return [...items].sort(
     (a, b) =>
+      b.bidAmountUnits - a.bidAmountUnits ||
       b.upvotes - a.upvotes ||
       (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
   );

@@ -174,14 +174,18 @@ export async function GET(req: NextRequest) {
       upvotes: s.upvotes.reduce((sum, v) => sum + v.value, 0),
       // This caller's own vote, so the UI can highlight up/down: 1 | -1 | 0.
       myVote: s.upvotes.find((v) => v.userId === user.id)?.value ?? 0,
+      // Cumulative paid bid in paise — the primary sort key (see below).
+      bidAmountUnits: s.bidAmountUnits,
       // ISO timestamp — the client uses it as the vote tie-breaker and to keep
       // its optimistic re-sort identical to the server's ordering.
       createdAt: s.createdAt.toISOString(),
     }))
-    // Highest score first; ties broken by whoever was added earlier (ISO strings
-    // compare chronologically). Explicit so it never depends on sort stability.
+    // Highest paid bid first, then highest net score; ties broken by whoever was
+    // added earlier (ISO strings compare chronologically). Explicit so it never
+    // depends on sort stability. Mirrors sortQueue() in app/lib/queue.ts exactly.
     .sort(
       (a, b) =>
+        b.bidAmountUnits - a.bidAmountUnits ||
         b.upvotes - a.upvotes ||
         (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
     );
