@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prismaClient } from "@/app/lib/db";
-import { authOptions } from "@/app/lib/auth";
-import { getServerSession } from "next-auth";
+import { getCurrentUser } from "@/app/lib/auth";
 import { isParticipant } from "@/app/lib/access";
 import { cacheGet, cacheSet, rateLimit, publishQueueChanged } from "@/app/lib/redis";
 import { fetchVideoMeta, type VideoMeta } from "@/app/lib/youtube";
+import { compareQueue } from "@/app/lib/queue";
 
 const YT_REGEX =
   /^(?:(?:https?:)?\/\/)?(?:www\.)?(?:m\.)?(?:youtu(?:be)?\.com\/(?:v\/|embed\/|watch(?:\/|\?v=))|youtu\.be\/)((?:\w|-){11})(?:\S+)?$/;
@@ -34,16 +34,9 @@ async function getVideoMeta(extractedId: string): Promise<VideoMeta> {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    }
-
-    const authedUser = await prismaClient.user.findUnique({
-      where: { email: session.user.email },
-    });
+    const authedUser = await getCurrentUser();
     if (!authedUser) {
-      return NextResponse.json({ message: "User not found" }, { status: 404 });
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     // Throttle track spam: 20 adds / minute per user.
@@ -133,13 +126,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ message: "code required" }, { status: 400 });
   }
 
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  }
-  const user = await prismaClient.user.findUnique({
-    where: { email: session.user.email },
-  });
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
@@ -156,17 +143,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ message: "Invalid session" }, { status: 404 });
   }
 
+  // Gate the queue behind two-code membership.
+  if (!(await isParticipant(user.id, foundSession))) {
+    return NextResponse.json({ message: "Join this stream first" }, { status: 403 });
+  }
+
   // Guests can only bid when the host's payouts are actually live — surfaced to
   // the client so the Bid button knows whether to offer a payment or a notice.
   const acceptsPayments = Boolean(
     foundSession.host.razorpayAccountId &&
       foundSession.host.razorpayPayoutsEnabled
   );
-
-  // Gate the queue behind two-code membership.
-  if (!(await isParticipant(user.id, foundSession))) {
-    return NextResponse.json({ message: "Join this stream first" }, { status: 403 });
-  }
 
   const streams = await prismaClient.stream.findMany({
     where: { sessionId: foundSession.id },
@@ -192,15 +179,9 @@ export async function GET(req: NextRequest) {
       // its optimistic re-sort identical to the server's ordering.
       createdAt: s.createdAt.toISOString(),
     }))
-    // Highest paid bid first, then highest net score; ties broken by whoever was
-    // added earlier (ISO strings compare chronologically). Explicit so it never
-    // depends on sort stability. Mirrors sortQueue() in app/lib/queue.ts exactly.
-    .sort(
-      (a, b) =>
-        b.bidAmountUnits - a.bidAmountUnits ||
-        b.upvotes - a.upvotes ||
-        (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
-    );
+    // Bid, then votes, then oldest-first — the single shared ordering the
+    // clients re-use for their optimistic re-sort.
+    .sort(compareQueue);
 
   // Resolve the pinned "now playing" track. If the session has no current track
   // (fresh room, or the last one was played out) or it points at a track that no
@@ -233,16 +214,9 @@ const DeleteStreamSchema = z.object({
 // Host-only: remove a track from the queue (used to advance "Now Playing").
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    }
-
-    const user = await prismaClient.user.findUnique({
-      where: { email: session.user.email },
-    });
+    const user = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ message: "User not found" }, { status: 404 });
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     const parsed = DeleteStreamSchema.safeParse(await req.json());

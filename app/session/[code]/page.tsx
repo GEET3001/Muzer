@@ -7,24 +7,9 @@ import { useSession, signIn } from "next-auth/react";
 import { Appbar } from "@/app/components/Appbar";
 import { YouTubePlayer } from "@/app/components/YouTubePlayer";
 import { applyVote, type QueueResponse } from "@/app/lib/queue";
+import { fetcher, HttpError, useToast, type SearchResult } from "@/app/lib/api";
 import { BidModal } from "@/app/components/BidModal";
 import { ThumbsUp, ThumbsDown, Plus, Disc3, Music2, KeyRound, LogIn, Search, X, Banknote } from "lucide-react";
-
-type SearchResult = { videoId: string; title: string; thumbnail: string };
-
-class HttpError extends Error {
-  status: number;
-  constructor(status: number) {
-    super(`HTTP ${status}`);
-    this.status = status;
-  }
-}
-
-const fetcher = async (url: string) => {
-  const r = await fetch(url);
-  if (!r.ok) throw new HttpError(r.status);
-  return r.json();
-};
 
 export default function SessionPage() {
   const { code } = useParams<{ code: string }>();
@@ -42,12 +27,7 @@ export default function SessionPage() {
 
   // Bid flow: which track's BidModal is open, and a transient confirmation toast.
   const [bidFor, setBidFor] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
+  const [toast, setToast] = useToast();
 
   const { data, error, mutate } = useSWR<QueueResponse>(
     code && auth?.user ? `/api/streams?code=${code}` : null,
@@ -456,7 +436,6 @@ export default function SessionPage() {
       {bidFor && (
         <BidModal
           streamId={bidFor}
-          sessionCode={code}
           hostAcceptsPayments={hostAcceptsPayments}
           onClose={() => setBidFor(null)}
           onSuccess={() => {

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import crypto from "crypto";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/lib/auth";
+import { getCurrentUser } from "@/app/lib/auth";
 import { prismaClient } from "@/app/lib/db";
 import { isParticipant } from "@/app/lib/access";
 import { rateLimit } from "@/app/lib/redis";
@@ -25,16 +24,9 @@ const BidSchema = z.object({
 // the webhook credits it (see app/api/webhooks/razorpay/route.ts).
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    }
-
-    const user = await prismaClient.user.findUnique({
-      where: { email: session.user.email },
-    });
+    const user = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ message: "User not found" }, { status: 404 });
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     // Throttle bid spam: 10 / minute per user.

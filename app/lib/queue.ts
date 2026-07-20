@@ -26,17 +26,30 @@ export type QueueResponse = {
   host: { acceptsPayments: boolean };
 };
 
-// Re-sort exactly like the server: highest paid bid first, then highest net
-// votes, ties broken by whoever was added earliest (ISO timestamps compare
-// chronologically). This comparator is mirrored byte-for-byte in
-// app/api/streams/route.ts (GET) and app/api/streams/next/route.ts.
-export function sortQueue(items: QueueItem[]): QueueItem[] {
-  return [...items].sort(
-    (a, b) =>
-      b.bidAmountUnits - a.bidAmountUnits ||
-      b.upvotes - a.upvotes ||
-      (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
+// The one queue ordering, shared by every consumer: highest paid bid first, then
+// highest net votes, ties broken by whoever was added earliest (ISO timestamps
+// compare chronologically). Explicit tie-break — never relies on sort stability.
+//
+// GET /api/streams, POST /api/streams/next and the clients' optimistic re-sort
+// all call this. Keeping it in one place is what guarantees they can't drift:
+// a queue that reorders differently on the server than in the UI is the bug
+// this function exists to make impossible.
+export type QueueRank = {
+  bidAmountUnits: number;
+  upvotes: number;
+  createdAt: string;
+};
+
+export function compareQueue(a: QueueRank, b: QueueRank): number {
+  return (
+    b.bidAmountUnits - a.bidAmountUnits ||
+    b.upvotes - a.upvotes ||
+    (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
   );
+}
+
+export function sortQueue(items: QueueItem[]): QueueItem[] {
+  return [...items].sort(compareQueue);
 }
 
 // Optimistic result of clicking a vote button, mirroring the server's toggle

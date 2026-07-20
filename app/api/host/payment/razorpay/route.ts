@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/lib/auth";
+import { getCurrentUser } from "@/app/lib/auth";
+import { isHost } from "@/app/lib/access";
 import { prismaClient } from "@/app/lib/db";
 import { getRazorpay } from "@/app/lib/razorpay";
 
@@ -16,24 +16,12 @@ const ONBOARDING_URL = "https://dashboard.razorpay.com/app/route";
 // the current host, so bid payouts can be routed to them. Idempotent — a host
 // with an account already gets it back without a second Razorpay call.
 export async function POST() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await prismaClient.user.findUnique({
-    where: { email: session.user.email },
-  });
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  // Only hosts (users who run at least one session) can link a payout account.
-  const hostsASession = await prismaClient.session.findFirst({
-    where: { hostId: user.id },
-    select: { id: true },
-  });
-  if (!hostsASession) {
+  if (!(await isHost(user.id))) {
     return NextResponse.json(
       { message: "Only hosts can set up payments" },
       { status: 403 }

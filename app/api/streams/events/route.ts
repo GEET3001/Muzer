@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/lib/auth";
+import { getCurrentUser } from "@/app/lib/auth";
 import { prismaClient } from "@/app/lib/db";
 import { isParticipant } from "@/app/lib/access";
 import { subscribeQueueChanged } from "@/app/lib/redis";
@@ -14,12 +13,7 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   if (!code) return new Response("code required", { status: 400 });
 
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return new Response("Unauthorized", { status: 401 });
-
-  const user = await prismaClient.user.findUnique({
-    where: { email: session.user.email },
-  });
+  const user = await getCurrentUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
 
   const foundSession = await prismaClient.session.findUnique({ where: { code } });

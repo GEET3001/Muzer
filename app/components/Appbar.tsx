@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { signIn, signOut, useSession } from "next-auth/react";
 import Link from "next/link";
 import { Disc3, LogIn, LogOut, Menu, X, KeyRound } from 'lucide-react';
@@ -25,8 +25,6 @@ export function Appbar() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-8">
-          
-            
             {session.data?.user ? (
               <div className="flex items-center gap-4">
                 <Link
@@ -79,8 +77,6 @@ export function Appbar() {
       {isMobileMenuOpen && (
         <div className="md:hidden bg-black bg-opacity-95 backdrop-blur-lg border-t border-white border-opacity-10">
           <div className="px-4 py-6 space-y-4">
-           
-            
             <div className="pt-4 border-t border-white border-opacity-10">
               {session.data?.user ? (
                 <div className="space-y-4">

@@ -1,7 +1,8 @@
 import type { AuthOptions } from "next-auth";
+import { getServerSession } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { prismaClient } from "@/app/lib/db";
-import { Provider, Role } from "@prisma/client";
+import { Provider, Role, type User } from "@prisma/client";
 
 /**
  * Single source of truth for the NextAuth config. The route handler AND every
@@ -39,3 +40,18 @@ export const authOptions: AuthOptions = {
     },
   },
 };
+
+/**
+ * Resolve the signed-in user row for the current request, or null when there is
+ * no session (or the session points at a user we no longer have).
+ *
+ * `session.user` carries no id — only an email — so every authenticated route
+ * needs this same lookup. Callers own the failure response because the existing
+ * endpoints don't agree on one (`{ message }` vs `{ error }`, 401 vs 404), and
+ * those shapes are part of their public contract.
+ */
+export async function getCurrentUser(): Promise<User | null> {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return null;
+  return prismaClient.user.findUnique({ where: { email: session.user.email } });
+}

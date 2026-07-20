@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomInt } from "crypto";
 import { prismaClient } from "@/app/lib/db";
-import { authOptions } from "@/app/lib/auth";
+import { getCurrentUser } from "@/app/lib/auth";
 import { publishQueueChanged } from "@/app/lib/redis";
-import { getServerSession } from "next-auth";
 
 // Join code: easy to read aloud, no ambiguous chars (no 0/O/1/I). Uses a CSPRNG
 // (crypto.randomInt) so codes aren't predictable from Math.random's weak PRNG.
@@ -25,25 +24,23 @@ function generateAccessCode(length = 6) {
   return result;
 }
 
-async function requireUser() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return null;
-  return prismaClient.user.findUnique({ where: { email: session.user.email } });
+// The host's current room, if any. One room per host, so "most recent" is it.
+function findHostRoom(hostId: string) {
+  return prismaClient.session.findFirst({
+    where: { hostId },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
 // Returns the host's most recent session (with both codes) so the dashboard
 // can show credentials without re-creating a room on every reload.
 export async function GET() {
-  const user = await requireUser();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const existing = await prismaClient.session.findFirst({
-    where: { hostId: user.id },
-    orderBy: { createdAt: "desc" },
-  });
-
+  const existing = await findHostRoom(user.id);
   if (!existing) return NextResponse.json({ session: null });
 
   return NextResponse.json({
@@ -53,7 +50,7 @@ export async function GET() {
 }
 
 export async function POST() {
-  const user = await requireUser();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -61,10 +58,7 @@ export async function POST() {
   // One room at a time: if the host already has a session, return it instead of
   // creating another. This makes creation idempotent and keeps a single active
   // room per host (rotating codes is done via DELETE, which wipes the old one).
-  const current = await prismaClient.session.findFirst({
-    where: { hostId: user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const current = await findHostRoom(user.id);
   if (current) {
     return NextResponse.json({
       code: current.code,
@@ -97,7 +91,7 @@ export async function POST() {
 // tracks, memberships, then the session itself) in a single transaction so the
 // data is fully gone and FKs stay satisfied.
 export async function DELETE(req: NextRequest) {
-  const user = await requireUser();
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -109,10 +103,7 @@ export async function DELETE(req: NextRequest) {
 
   const target = code
     ? await prismaClient.session.findUnique({ where: { code } })
-    : await prismaClient.session.findFirst({
-        where: { hostId: user.id },
-        orderBy: { createdAt: "desc" },
-      });
+    : await findHostRoom(user.id);
 
   if (!target) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
@@ -123,14 +114,13 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const streams = await prismaClient.stream.findMany({
-    where: { sessionId: target.id },
-    select: { id: true },
-  });
-  const streamIds = streams.map((s) => s.id);
-
+  // Delete children before parents so the FKs stay satisfied. Votes are reached
+  // through a relation filter rather than a pre-fetched id list — one round trip
+  // instead of two, and no cap on how big the queue can be.
   await prismaClient.$transaction([
-    prismaClient.upvotes.deleteMany({ where: { streamId: { in: streamIds } } }),
+    prismaClient.upvotes.deleteMany({
+      where: { stream: { sessionId: target.id } },
+    }),
     prismaClient.stream.deleteMany({ where: { sessionId: target.id } }),
     prismaClient.sessionMember.deleteMany({ where: { sessionId: target.id } }),
     prismaClient.session.delete({ where: { id: target.id } }),

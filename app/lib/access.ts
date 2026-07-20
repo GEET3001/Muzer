@@ -15,3 +15,16 @@ export async function isParticipant(
   });
   return Boolean(member);
 }
+
+/**
+ * True once a user runs at least one room. Payout setup is host-only, and
+ * "hosts a session" is the only notion of host the schema has — there's no
+ * separate host flag on User.
+ */
+export async function isHost(userId: string): Promise<boolean> {
+  const hosted = await prismaClient.session.findFirst({
+    where: { hostId: userId },
+    select: { id: true },
+  });
+  return Boolean(hosted);
+}

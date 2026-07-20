@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/lib/auth";
+import { getCurrentUser } from "@/app/lib/auth";
 import { prismaClient } from "@/app/lib/db";
 import { publishQueueChanged } from "@/app/lib/redis";
+import { compareQueue } from "@/app/lib/queue";
 
 const NextSchema = z.object({
   code: z.string().min(1),
@@ -15,13 +15,7 @@ const NextSchema = z.object({
 // the current track. Called automatically when the host's player fires "ended",
 // or manually via the host's Skip button.
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  }
-  const user = await prismaClient.user.findUnique({
-    where: { email: session.user.email },
-  });
+  const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
@@ -55,28 +49,22 @@ export async function POST(req: NextRequest) {
       ]);
     }
 
-    // Pick the next track: highest paid bid first, then highest net votes, ties
-    // broken by earliest added. Comparator is explicit (does NOT rely on JS sort
-    // stability) and mirrors sortQueue() in app/lib/queue.ts exactly.
+    // Pick the next track using the one shared ordering (bid, then votes, then
+    // oldest first) so the deck advances to exactly the track the queue UI shows
+    // at the top.
     const remaining = await prismaClient.stream.findMany({
       where: { sessionId: foundSession.id },
       include: { upvotes: true },
-      orderBy: { createdAt: "asc" },
     });
-    const ranked = remaining
-      .map((s) => ({
-        id: s.id,
-        bidAmountUnits: s.bidAmountUnits,
-        score: s.upvotes.reduce((sum, v) => sum + v.value, 0),
-        createdAt: s.createdAt.toISOString(),
-      }))
-      .sort(
-        (a, b) =>
-          b.bidAmountUnits - a.bidAmountUnits ||
-          b.score - a.score ||
-          (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)
-      );
-    const nextId = ranked[0]?.id ?? null;
+    const nextId =
+      remaining
+        .map((s) => ({
+          id: s.id,
+          bidAmountUnits: s.bidAmountUnits,
+          upvotes: s.upvotes.reduce((sum, v) => sum + v.value, 0),
+          createdAt: s.createdAt.toISOString(),
+        }))
+        .sort(compareQueue)[0]?.id ?? null;
 
     await prismaClient.session.update({
       where: { id: foundSession.id },

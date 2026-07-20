@@ -26,14 +26,7 @@ import { Appbar } from "../components/Appbar";
 import { YouTubePlayer } from "../components/YouTubePlayer";
 import { BidModal } from "../components/BidModal";
 import { applyVote, type QueueItem, type QueueResponse } from "../lib/queue";
-
-type SearchResult = { videoId: string; title: string; thumbnail: string };
-
-const fetcher = (url: string) =>
-  fetch(url).then((res) => {
-    if (!res.ok) throw new Error("Request failed");
-    return res.json();
-  });
+import { fetcher, useToast, type SearchResult } from "../lib/api";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -55,12 +48,7 @@ export default function Dashboard() {
   const [refreshingPay, setRefreshingPay] = useState(false);
   // Bid flow: which track's BidModal is open, and a transient confirmation toast.
   const [bidFor, setBidFor] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
+  const [toast, setToast] = useToast();
 
   // Redirect if unauthenticated
   useEffect(() => {
@@ -69,9 +57,11 @@ export default function Dashboard() {
     }
   }, [status, router]);
 
-  // Load the host's existing room (with both codes) or create one. Reusing the
-  // server as the source of truth avoids the cross-account localStorage bug.
-  const loadOrCreateRoom = useCallback(async (): Promise<boolean> => {
+  // Adopt the host's existing room, creating one only if they have none. The
+  // server is the source of truth for both codes — deriving them from
+  // localStorage used to leak one account's room into another's dashboard.
+  // POST is idempotent, so the create call is safe if two tabs race here.
+  const loadOrCreateRoom = useCallback(async () => {
     let res = await fetch("/api/sessions");
     let json = res.ok ? await res.json() : null;
     if (!json?.code) {
@@ -81,29 +71,12 @@ export default function Dashboard() {
     if (json?.code) {
       setSessionCode(json.code);
       setAccessCode(json.accessCode);
-      return true;
     }
-    return false;
   }, []);
 
   useEffect(() => {
     if (status !== "authenticated") return;
-
-    let cancelled = false;
-    (async () => {
-      const res = await fetch("/api/sessions");
-      const json = res.ok ? await res.json() : null;
-      if (cancelled) return;
-      if (json?.code) {
-        setSessionCode(json.code);
-        setAccessCode(json.accessCode);
-      } else {
-        await loadOrCreateRoom();
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    loadOrCreateRoom();
   }, [status, loadOrCreateRoom]);
 
   const copyCode = async (value: string, which: "code" | "access") => {
@@ -701,10 +674,9 @@ export default function Dashboard() {
       </div>
 
       {/* Bid modal */}
-      {bidFor && sessionCode && (
+      {bidFor && (
         <BidModal
           streamId={bidFor}
-          sessionCode={sessionCode}
           hostAcceptsPayments={hostAcceptsPayments}
           onClose={() => setBidFor(null)}
           onSuccess={() => {

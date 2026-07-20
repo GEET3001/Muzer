@@ -26,10 +26,9 @@ declare global {
 }
 
 type BidModalProps = {
+  // The track to boost. No session code needed — POST /api/streams/bid derives
+  // the session (and its host's payout account) from the stream server-side.
   streamId: string;
-  // Part of the props contract; the bid route derives the session from the
-  // stream server-side, so it isn't read here (kept for callers / future use).
-  sessionCode: string;
   hostAcceptsPayments: boolean;
   onClose: () => void;
   // Fired once the guest completes Razorpay Checkout. The queue does NOT move

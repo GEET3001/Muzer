@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prismaClient } from "@/app/lib/db";
-import { authOptions } from "@/app/lib/auth";
+import { getCurrentUser } from "@/app/lib/auth";
 import { rateLimit } from "@/app/lib/redis";
-import { getServerSession } from "next-auth";
 
 const JoinSchema = z.object({
   code: z.string().min(1, "Join code is required"),
@@ -11,16 +10,9 @@ const JoinSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await prismaClient.user.findUnique({
-    where: { email: session.user.email },
-  });
+  const user = await getCurrentUser();
   if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // The access code is only a 6-digit PIN, so throttle hard to make brute-force
